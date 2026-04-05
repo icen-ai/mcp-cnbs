@@ -1,0 +1,63 @@
+{
+  "name": "@icen.ai/mcp-cnbs",
+  "version": "1.0.0",
+  "description": "MCP server for China National Bureau of Statistics (CNBS) data access",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "bin": {
+    "mcp-cnbs": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "llms.txt",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js --port 12345",
+    "dev": "bun run --watch src/index.ts --port 12345",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy"
+  },
+  "keywords": [
+    "mcp",
+    "statistics",
+    "china",
+    "nbs",
+    "cnbs",
+    "modelcontextprotocol",
+    "gdp",
+    "cpi",
+    "population"
+  ],
+  "author": "J.K.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:icen-ai/mcp-cnbs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/icen-ai/mcp-cnbs/issues"
+  },
+  "homepage": "https://github.com/icen-ai/mcp-cnbs#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.9.0",
+    "axios": "^1.8.4",
+    "commander": "^14.0.0",
+    "mcp-http-server": "^1.1.5",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260404.1",
+    "@types/node": "^20.19.0",
+    "typescript": "^5.3.0"
+  }
+}
