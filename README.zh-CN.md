@@ -55,7 +55,20 @@ mcp-cnbs
 
 ### HTTP 模式（远程访问）
 
-**Streamable HTTP（推荐）：**
+**魔搭免费演示（推荐）：**
+```json
+{
+  "mcpServers": {
+    "cnbs": {
+      "type": "streamable_http",
+      "url": "https://mcp.api-inference.modelscope.net/86a1a6b0b08741/mcp"
+    }
+  }
+}
+```
+> 免费、无需鉴权。[查看魔搭主页](https://modelscope.cn/mcp/servers/thatcoder/cnbs)
+
+**自托管 Streamable HTTP：**
 ```json
 {
   "mcpServers": {

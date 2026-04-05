@@ -55,7 +55,20 @@ Add to `claude_desktop_config.json`:
 
 ### HTTP Mode (for remote access)
 
-**Streamable HTTP (recommended):**
+**Free Demo on ModelScope (recommended):**
+```json
+{
+  "mcpServers": {
+    "cnbs": {
+      "type": "streamable_http",
+      "url": "https://mcp.api-inference.modelscope.net/86a1a6b0b08741/mcp"
+    }
+  }
+}
+```
+> Free, no authentication required. [View on ModelScope](https://modelscope.cn/mcp/servers/thatcoder/cnbs)
+
+**Self-hosted Streamable HTTP:**
 ```json
 {
   "mcpServers": {
