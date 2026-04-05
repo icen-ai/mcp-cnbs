@@ -1,6 +1,6 @@
 {
   "name": "@icen.ai/mcp-cnbs",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server for China National Bureau of Statistics (CNBS) data access",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
