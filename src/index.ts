@@ -2,11 +2,11 @@
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { Command } from 'commander';
 import http from 'http';
 import { createCnbsServer } from './server.js';
-import { isInitializeRequest, JSONRPCMessageSchema } from '@modelcontextprotocol/sdk/types.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 function checkAuth(authToken: string | undefined, authHeader: string | undefined): { authorized: boolean; error?: string } {
   if (!authToken) {
@@ -36,34 +36,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version',
 };
 
-class SSETransport {
-  sessionId: string | undefined;
-  private res: http.ServerResponse;
-  onclose?: () => void;
-  onerror?: (error: Error) => void;
-  onmessage?: (message: any) => void;
-
-  constructor(res: http.ServerResponse, sessionId: string) {
-    this.res = res;
-    this.sessionId = sessionId;
-  }
-
-  async start(): Promise<void> {}
-
-  async close(): Promise<void> {
-    this.onclose?.();
-  }
-
-  async send(message: any): Promise<void> {
-    const event = `event: message\ndata: ${JSON.stringify(message)}\n\n`;
-    try {
-      this.res.write(event);
-    } catch {
-      this.onerror?.(new Error('Failed to send message'));
-    }
-  }
-}
-
 async function launchCnbsServer() {
   const program = new Command();
 
@@ -78,7 +50,7 @@ async function launchCnbsServer() {
 
   if (options.port) {
     const port = parseInt(options.port, 10);
-    const sseTransports = new Map<string, SSETransport>();
+    const transports: Map<string, StreamableHTTPServerTransport> = new Map();
 
     if (authToken) {
       console.error(`CNBS MCP HTTP server running on ${options.host}:${port} with authentication enabled`);
@@ -107,73 +79,161 @@ async function launchCnbsServer() {
         return;
       }
 
-      // / 作为 SSE 端点（默认）
-      if (url.pathname === '/' || url.pathname === '/sse' || url.pathname === '/sse/') {
-        const sessionId = crypto.randomUUID();
-        const transport = new SSETransport(res, sessionId);
-        sseTransports.set(sessionId, transport);
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
-        res.writeHead(200, {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-          ...corsHeaders
-        });
+      if (sessionId) {
+        const transport = transports.get(sessionId);
+        if (!transport) {
+          res.writeHead(404, { 'Content-Type': 'application/json', ...corsHeaders });
+          res.end(JSON.stringify({
+            jsonrpc: '2.0',
+            error: { code: -32001, message: 'Session not found. Server not initialized.' },
+            id: null
+          }));
+          return;
+        }
 
-        const endpointEvent = `event: endpoint\ndata: /message?sessionId=${sessionId}\n\n`;
-        res.write(endpointEvent);
+        if (req.method === 'POST') {
+          let body: any = null;
+          try {
+            body = await new Promise((resolve, reject) => {
+              let data = '';
+              req.on('data', chunk => data += chunk);
+              req.on('end', () => {
+                try {
+                  resolve(JSON.parse(data));
+                } catch {
+                  resolve(null);
+                }
+              });
+              req.on('error', reject);
+            });
+          } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json', ...corsHeaders });
+            res.end(JSON.stringify({
+              jsonrpc: '2.0',
+              error: { code: -32603, message: 'Internal error reading request body' },
+              id: null
+            }));
+            return;
+          }
 
-        const mcpServer = createCnbsServer();
-        transport.onclose = () => {
-          sseTransports.delete(sessionId);
-        };
-        await mcpServer.connect(transport as any);
+          await transport.handleRequest(req, res, body);
+          return;
+        }
+
+        if (req.method === 'GET') {
+          const acceptHeader = req.headers['accept'] || '';
+          if (!acceptHeader.includes('text/event-stream')) {
+            res.writeHead(406, { 'Content-Type': 'application/json', ...corsHeaders });
+            res.end(JSON.stringify({
+              jsonrpc: '2.0',
+              error: { code: -32600, message: 'Not Acceptable: Client must accept text/event-stream for GET requests' },
+              id: null
+            }));
+            return;
+          }
+
+          await transport.handleRequest(req, res);
+          return;
+        }
+
+        if (req.method === 'DELETE') {
+          await transport.handleRequest(req, res);
+          transports.delete(sessionId);
+          return;
+        }
+
+        res.writeHead(405, { 'Content-Type': 'application/json', ...corsHeaders });
+        res.end(JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32601, message: 'Method not allowed. Use POST, GET, or DELETE.' },
+          id: null
+        }));
         return;
       }
 
-      if (url.pathname === '/message') {
-        const sessionId = url.searchParams.get('sessionId');
-        if (!sessionId) {
-          res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
-          res.end(JSON.stringify({ error: 'Missing sessionId' }));
-          return;
-        }
-
-        const transport = sseTransports.get(sessionId);
-        if (!transport) {
-          res.writeHead(404, { 'Content-Type': 'application/json', ...corsHeaders });
-          res.end(JSON.stringify({ error: 'Session not found' }));
-          return;
-        }
-
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', () => {
-          try {
-            const parsed = JSON.parse(body);
-            const messages = Array.isArray(parsed) ? parsed : [parsed];
-            for (const msg of messages) {
+      if (req.method === 'POST' && (url.pathname === '/' || url.pathname === '/mcp')) {
+        let body: any;
+        try {
+          body = await new Promise<any>((resolve, reject) => {
+            let data = '';
+            req.on('data', chunk => data += chunk);
+            req.on('end', () => {
               try {
-                const validated = JSONRPCMessageSchema.parse(msg);
-                transport.onmessage?.(validated);
-              } catch (e) {
-                console.error('Failed to parse message:', e);
+                resolve(JSON.parse(data));
+              } catch {
+                resolve(null);
               }
+            });
+            req.on('error', reject);
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json', ...corsHeaders });
+          res.end(JSON.stringify({
+            jsonrpc: '2.0',
+            error: { code: -32603, message: 'Internal error reading request body' },
+            id: null
+          }));
+          return;
+        }
+
+        if (!body) {
+          res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
+          res.end(JSON.stringify({
+            jsonrpc: '2.0',
+            error: { code: -32700, message: 'Parse error: Invalid JSON' },
+            id: null
+          }));
+          return;
+        }
+
+        const messages = Array.isArray(body) ? body : [body];
+        const isInit = messages.some((m: any) => isInitializeRequest(m));
+
+        if (isInit) {
+          const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => crypto.randomUUID(),
+            onsessioninitialized: (sessionId) => {
+              transports.set(sessionId, transport);
             }
-            res.writeHead(202, corsHeaders);
-            res.end('Accepted');
-          } catch {
-            res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
-            res.end(JSON.stringify({ error: 'Invalid JSON' }));
-          }
-        });
+          });
+
+          transport.onclose = () => {
+            if (transport.sessionId) {
+              transports.delete(transport.sessionId);
+            }
+          };
+
+          const mcpServer = createCnbsServer();
+          await mcpServer.connect(transport);
+          await transport.handleRequest(req, res, body);
+          return;
+        }
+
+        res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
+        res.end(JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32002, message: 'Server not initialized. Send initialize request first.' },
+          id: null
+        }));
+        return;
+      }
+
+      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/mcp')) {
+        res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
+        res.end(JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32002, message: 'Server not initialized. Send initialize request first.' },
+          id: null
+        }));
         return;
       }
 
       res.writeHead(404, { 'Content-Type': 'application/json', ...corsHeaders });
       res.end(JSON.stringify({
         jsonrpc: '2.0',
-        error: { code: -32601, message: 'Method not found. Use / for SSE endpoint.' },
+        error: { code: -32601, message: 'Method not found. Use POST / for Streamable HTTP.' },
         id: null
       }));
     });

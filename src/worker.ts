@@ -189,7 +189,23 @@ export class NationalStatsAgent {
   async handleMCPRequest(request: Request): Promise<Response> {
     const sessionId = request.headers.get('mcp-session-id');
     
-    if (sessionId && this.transport && this.transport.sessionId === sessionId) {
+    if (sessionId) {
+      if (!this.transport) {
+        return new Response(JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32001, message: 'Session not found. Server not initialized.' },
+          id: null
+        }), { status: 404, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+      }
+      
+      if (this.transport.sessionId !== sessionId) {
+        return new Response(JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32001, message: 'Invalid session ID. Session expired or not found.' },
+          id: null
+        }), { status: 404, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+      }
+      
       return this.transport.handleRequest(request);
     }
 
@@ -209,12 +225,10 @@ export class NationalStatsAgent {
       const isInit = messages.some((m: any) => isInitializeRequest(m));
 
       if (isInit) {
-        if (this.transport && this.transport.sessionId) {
-          return new Response(JSON.stringify({
-            jsonrpc: '2.0',
-            error: { code: -32600, message: 'Invalid Request: Server already initialized' },
-            id: null
-          }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+        if (this.transport) {
+          await this.transport.close();
+          this.transport = null;
+          this.server = null;
         }
 
         this.transport = new WebStandardStreamableHTTPServerTransport({
@@ -231,6 +245,16 @@ export class NationalStatsAgent {
 
         return this.transport.handleRequest(request, { parsedBody: body });
       }
+
+      if (!this.transport) {
+        return new Response(JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32002, message: 'Server not initialized. Send initialize request first.' },
+          id: null
+        }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+      }
+
+      return this.transport.handleRequest(request);
     }
 
     if (request.method === 'GET') {
@@ -238,7 +262,7 @@ export class NationalStatsAgent {
       if (!acceptHeader?.includes('text/event-stream')) {
         return new Response(JSON.stringify({
           jsonrpc: '2.0',
-          error: { code: -32000, message: 'Not Acceptable: Client must accept text/event-stream' },
+          error: { code: -32600, message: 'Not Acceptable: Client must accept text/event-stream for GET requests' },
           id: null
         }), { status: 406, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
       }
@@ -246,7 +270,7 @@ export class NationalStatsAgent {
       if (!this.transport) {
         return new Response(JSON.stringify({
           jsonrpc: '2.0',
-          error: { code: -32000, message: 'Bad Request: Server not initialized' },
+          error: { code: -32002, message: 'Server not initialized. Send initialize request first.' },
           id: null
         }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
       }
@@ -265,7 +289,7 @@ export class NationalStatsAgent {
 
     return new Response(JSON.stringify({
       jsonrpc: '2.0',
-      error: { code: -32000, message: 'Method not allowed' },
+      error: { code: -32601, message: 'Method not allowed. Use POST for MCP requests, GET for SSE stream, or DELETE to close session.' },
       id: null
     }), { status: 405, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
   }
