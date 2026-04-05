@@ -13,13 +13,13 @@ npx @icen.ai/mcp-cnbs
 ### Use with HTTP transport
 
 ```bash
-npx @icen/mcp-cnbs --port 12345
+npx @icen.ai/mcp-cnbs --port 12345
 ```
 
 ### Install globally
 
 ```bash
-npm install -g @icen/mcp-cnbs
+npm install -g @icen.ai/mcp-cnbs
 mcp-cnbs
 ```
 
@@ -34,7 +34,7 @@ Add to `claude_desktop_config.json`:
   "mcpServers": {
     "cnbs": {
       "command": "npx",
-      "args": ["@icen/mcp-cnbs"]
+      "args": ["@icen.ai/mcp-cnbs"]
     }
   }
 }
@@ -47,7 +47,7 @@ Add to `claude_desktop_config.json`:
   "mcpServers": {
     "cnbs": {
       "command": "npx",
-      "args": ["@icen/mcp-cnbs"]
+      "args": ["@icen.ai/mcp-cnbs"]
     }
   }
 }
@@ -195,10 +195,10 @@ By default, no authentication is required. You can enable authentication using B
 
 ```bash
 # Using command line argument
-npx @icen/mcp-cnbs --port 12345 --auth-token your-secret-token
+npx @icen.ai/mcp-cnbs --port 12345 --auth-token your-secret-token
 
 # Using environment variable
-MCP_CNBS_AUTH_TOKEN=your-secret-token npx @icen/mcp-cnbs --port 12345
+MCP_CNBS_AUTH_TOKEN=your-secret-token npx @icen.ai/mcp-cnbs --port 12345
 ```
 
 When authentication is enabled, requests must include:
@@ -226,7 +226,7 @@ npx wrangler secret put MCP_CNBS_AUTH_TOKEN
   "mcpServers": {
     "cnbs": {
       "command": "npx",
-      "args": ["mcp-cnbs", "--port", "12345", "--auth-token", "your-secret-token"]
+      "args": ["@icen.ai/mcp-cnbs", "--port", "12345", "--auth-token", "your-secret-token"]
     }
   }
 }

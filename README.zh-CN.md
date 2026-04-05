@@ -13,13 +13,13 @@ npx @icen.ai/mcp-cnbs
 ### HTTP 模式
 
 ```bash
-npx @icen/mcp-cnbs --port 12345
+npx @icen.ai/mcp-cnbs --port 12345
 ```
 
 ### 全局安装
 
 ```bash
-npm install -g @icen/mcp-cnbs
+npm install -g @icen.ai/mcp-cnbs
 mcp-cnbs
 ```
 
@@ -34,7 +34,7 @@ mcp-cnbs
   "mcpServers": {
     "cnbs": {
       "command": "npx",
-      "args": ["@icen/mcp-cnbs"]
+      "args": ["@icen.ai/mcp-cnbs"]
     }
   }
 }
@@ -47,7 +47,7 @@ mcp-cnbs
   "mcpServers": {
     "cnbs": {
       "command": "npx",
-      "args": ["@icen/mcp-cnbs"]
+      "args": ["@icen.ai/mcp-cnbs"]
     }
   }
 }
@@ -195,10 +195,10 @@ npm run dev
 
 ```bash
 # 命令行参数
-npx @icen/mcp-cnbs --port 12345 --auth-token your-secret-token
+npx @icen.ai/mcp-cnbs --port 12345 --auth-token your-secret-token
 
 # 环境变量
-MCP_CNBS_AUTH_TOKEN=your-secret-token npx @icen/mcp-cnbs --port 12345
+MCP_CNBS_AUTH_TOKEN=your-secret-token npx @icen.ai/mcp-cnbs --port 12345
 ```
 
 启用鉴权后，请求需包含：
@@ -225,7 +225,7 @@ npx wrangler secret put MCP_CNBS_AUTH_TOKEN
   "mcpServers": {
     "cnbs": {
       "command": "npx",
-      "args": ["mcp-cnbs", "--port", "12345", "--auth-token", "your-secret-token"]
+      "args": ["@icen.ai/mcp-cnbs", "--port", "12345", "--auth-token", "your-secret-token"]
     }
   }
 }
