@@ -25,22 +25,11 @@ mcp-cnbs
 
 ## MCP 客户端配置
 
-### Claude Desktop
+### NPX 模式（本地运行）
 
-添加到 `claude_desktop_config.json`：
+**支持的客户端：** Claude Desktop、Cursor、Windsurf、Cherry Studio、Trae、Continue 等所有支持 MCP 的客户端。
 
-```json
-{
-  "mcpServers": {
-    "cnbs": {
-      "command": "npx",
-      "args": ["@icen.ai/mcp-cnbs"]
-    }
-  }
-}
-```
-
-### Cursor / Windsurf
+添加到 MCP 客户端配置文件：
 
 ```json
 {
@@ -55,40 +44,22 @@ mcp-cnbs
 
 ### HTTP 模式（远程访问）
 
+**支持的客户端：** Trae、Cherry Studio 等支持 HTTP transport 的客户端。
+
 **魔搭免费演示（推荐）：**
 ```json
 {
   "mcpServers": {
     "cnbs": {
-      "type": "streamable_http",
-      "url": "https://mcp.api-inference.modelscope.net/86a1a6b0b08741/mcp"
-    }
-  }
-}
-```
-> 免费、无需鉴权。[查看魔搭主页](https://modelscope.cn/mcp/servers/thatcoder/cnbs)
-
-**自托管 Streamable HTTP：**
-```json
-{
-  "mcpServers": {
-    "cnbs": {
-      "url": "http://cnbs.mcp.icen.ai"
+      "url": "https://mcp.api-inference.modelscope.net/3d34f0e0c26a44/mcp"
     }
   }
 }
 ```
 
-**旧版 SSE（兼容旧客户端）：**
-```json
-{
-  "mcpServers": {
-    "cnbs": {
-      "url": "http://cnbs.mcp.icen.ai/sse"
-    }
-  }
-}
-```
+> **注意：** 这是阿里云 ModelScope 提供的免费公共演示服务，无需认证。
+>
+> 由于免费服务可能变更，建议自行部署：[在魔搭免费部署](https://modelscope.cn/mcp/servers/thatcoder/cnbs)
 
 ## 端点说明
 

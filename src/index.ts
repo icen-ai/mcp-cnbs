@@ -3,6 +3,7 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { Command } from 'commander';
 import http from 'http';
 import { createCnbsServer } from './server.js';
@@ -51,6 +52,7 @@ async function launchCnbsServer() {
   if (options.port) {
     const port = parseInt(options.port, 10);
     const transports: Map<string, StreamableHTTPServerTransport> = new Map();
+    const sseTransports: Map<string, SSEServerTransport> = new Map();
 
     if (authToken) {
       console.error(`CNBS MCP HTTP server running on ${options.host}:${port} with authentication enabled`);
@@ -79,6 +81,93 @@ async function launchCnbsServer() {
         return;
       }
 
+      // SSE endpoint
+      if (url.pathname === '/sse' || url.pathname === '/sse/') {
+        if (req.method !== 'GET') {
+          res.writeHead(405, { 'Content-Type': 'application/json', ...corsHeaders });
+          res.end(JSON.stringify({
+            jsonrpc: '2.0',
+            error: { code: -32601, message: 'Method not allowed. Use GET for SSE endpoint.' },
+            id: null
+          }));
+          return;
+        }
+
+        const transport = new SSEServerTransport('/message', res);
+        sseTransports.set(transport.sessionId, transport);
+
+        res.on('close', () => {
+          sseTransports.delete(transport.sessionId);
+        });
+
+        const mcpServer = createCnbsServer();
+        await mcpServer.connect(transport);
+        return;
+      }
+
+      // SSE message endpoint
+      if (url.pathname === '/message') {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'Content-Type': 'application/json', ...corsHeaders });
+          res.end(JSON.stringify({
+            jsonrpc: '2.0',
+            error: { code: -32601, message: 'Method not allowed. Use POST for message endpoint.' },
+            id: null
+          }));
+          return;
+        }
+
+        const sessionId = url.searchParams.get('sessionId');
+        if (!sessionId) {
+          res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
+          res.end(JSON.stringify({
+            jsonrpc: '2.0',
+            error: { code: -32600, message: 'Missing sessionId parameter' },
+            id: null
+          }));
+          return;
+        }
+
+        const transport = sseTransports.get(sessionId);
+        if (!transport) {
+          res.writeHead(404, { 'Content-Type': 'application/json', ...corsHeaders });
+          res.end(JSON.stringify({
+            jsonrpc: '2.0',
+            error: { code: -32001, message: 'Session not found' },
+            id: null
+          }));
+          return;
+        }
+
+        let body: any = null;
+        try {
+          body = await new Promise((resolve, reject) => {
+            let data = '';
+            req.on('data', chunk => data += chunk);
+            req.on('end', () => {
+              try {
+                resolve(JSON.parse(data));
+              } catch {
+                resolve(null);
+              }
+            });
+            req.on('error', reject);
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json', ...corsHeaders });
+          res.end(JSON.stringify({
+            jsonrpc: '2.0',
+            error: { code: -32603, message: 'Internal error reading request body' },
+            id: null
+          }));
+          return;
+        }
+
+        await transport.handlePostMessage(req, res, body);
+        return;
+      }
+
+      // Streamable HTTP endpoints
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
       if (sessionId) {
@@ -233,7 +322,7 @@ async function launchCnbsServer() {
       res.writeHead(404, { 'Content-Type': 'application/json', ...corsHeaders });
       res.end(JSON.stringify({
         jsonrpc: '2.0',
-        error: { code: -32601, message: 'Method not found. Use POST / for Streamable HTTP.' },
+        error: { code: -32601, message: 'Method not found. Use POST / for Streamable HTTP or GET /sse for SSE.' },
         id: null
       }));
     });

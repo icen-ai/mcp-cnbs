@@ -25,22 +25,11 @@ mcp-cnbs
 
 ## MCP Client Configuration
 
-### Claude Desktop
+### NPX Mode (Local)
 
-Add to `claude_desktop_config.json`:
+**Supported clients:** Claude Desktop, Cursor, Windsurf, Cherry Studio, Trae, Continue, and other MCP clients.
 
-```json
-{
-  "mcpServers": {
-    "cnbs": {
-      "command": "npx",
-      "args": ["@icen.ai/mcp-cnbs"]
-    }
-  }
-}
-```
-
-### Cursor / Windsurf
+Add to your MCP client configuration file:
 
 ```json
 {
@@ -53,42 +42,24 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-### HTTP Mode (for remote access)
+### HTTP Mode (Remote Access)
+
+**Supported clients:** Trae, Cherry Studio, and other MCP clients with HTTP transport support.
 
 **Free Demo on ModelScope (recommended):**
 ```json
 {
   "mcpServers": {
     "cnbs": {
-      "type": "streamable_http",
-      "url": "https://mcp.api-inference.modelscope.net/86a1a6b0b08741/mcp"
-    }
-  }
-}
-```
-> Free, no authentication required. [View on ModelScope](https://modelscope.cn/mcp/servers/thatcoder/cnbs)
-
-**Self-hosted Streamable HTTP:**
-```json
-{
-  "mcpServers": {
-    "cnbs": {
-      "url": "http://cnbs.mcp.icen.ai"
+      "url": "https://mcp.api-inference.modelscope.net/3d34f0e0c26a44/mcp"
     }
   }
 }
 ```
 
-**Legacy SSE (for older clients):**
-```json
-{
-  "mcpServers": {
-    "cnbs": {
-      "url": "http://cnbs.mcp.icen.ai/sse"
-    }
-  }
-}
-```
+> **Note:** This is a free public demo provided by Alibaba Cloud ModelScope. No authentication required.
+>
+> Since free services may change, we recommend deploying your own instance: [Deploy on ModelScope](https://modelscope.cn/mcp/servers/thatcoder/cnbs)
 
 ## Endpoints
 

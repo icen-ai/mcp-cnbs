@@ -1,6 +1,6 @@
 {
   "name": "@icen.ai/mcp-cnbs",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "MCP server for China National Bureau of Statistics (CNBS) data access",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -42,7 +42,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git@github.com:icen-ai/mcp-cnbs.git"
+    "url": "https://github.com/icen-ai/mcp-cnbs.git"
   },
   "bugs": {
     "url": "https://github.com/icen-ai/mcp-cnbs/issues"
