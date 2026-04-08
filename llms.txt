@@ -561,10 +561,10 @@ https://mcp.api-inference.modelscope.net/86a1a6b0b08741/mcp
 
 ```bash
 # 本地启动带鉴权
-npx @icen.ai/mcp-cnbs --port 12345 --auth-token your-secret-token
+npx mcp-cnbs --port 12345 --auth-token your-secret-token
 
 # 或使用环境变量
-MCP_CNBS_AUTH_TOKEN=your-secret-token npx @icen.ai/mcp-cnbs --port 12345
+MCP_CNBS_AUTH_TOKEN=your-secret-token npx mcp-cnbs --port 12345
 ```
 
 ### 请求格式

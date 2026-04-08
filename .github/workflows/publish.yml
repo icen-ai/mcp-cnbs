@@ -38,12 +38,10 @@ jobs:
           jq ".version = \"${{ steps.extract_version.outputs.VERSION }}\"" package.json > package.json.tmp && mv package.json.tmp package.json
           echo "Updated package.json version to ${{ steps.extract_version.outputs.VERSION }}"
 
-      - name: Publish to npm (scoped @icen.ai/mcp-cnbs)
-        run: |
-          sed -i 's/"name": "mcp-cnbs"/"name": "@icen.ai\/mcp-cnbs"/g' package.json
-          npm publish --access public --provenance
+#      - name: Publish to npm (scoped @icen.ai/mcp-cnbs)
+#        run: |
+#          sed -i 's/"name": "mcp-cnbs"/"name": "@icen.ai\/mcp-cnbs"/g' package.json
+#          npm publish --access public --provenance
 
       - name: Publish to npm (unscoped mcp-cnbs)
-        run: |
-          sed -i 's/"name": "@icen.ai\/mcp-cnbs"/"name": "mcp-cnbs"/g' package.json
-          npm publish --access public --provenance
+        run: npm publish --access public --provenance

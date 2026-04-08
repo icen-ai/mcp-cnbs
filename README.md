@@ -7,19 +7,19 @@ MCP server for querying China National Bureau of Statistics data.
 ### Use with npx (Recommended)
 
 ```bash
-npx @icen.ai/mcp-cnbs
+npx mcp-cnbs
 ```
 
 ### Use with HTTP transport
 
 ```bash
-npx @icen.ai/mcp-cnbs --port 12345
+npx mcp-cnbs --port 12345
 ```
 
 ### Install globally
 
 ```bash
-npm install -g @icen.ai/mcp-cnbs
+npm install -g mcp-cnbs
 mcp-cnbs
 ```
 
@@ -36,7 +36,7 @@ Add to your MCP client configuration file:
   "mcpServers": {
     "cnbs": {
       "command": "npx",
-      "args": ["@icen.ai/mcp-cnbs"]
+      "args": ["mcp-cnbs"]
     }
   }
 }
@@ -179,10 +179,10 @@ By default, no authentication is required. You can enable authentication using B
 
 ```bash
 # Using command line argument
-npx @icen.ai/mcp-cnbs --port 12345 --auth-token your-secret-token
+npx mcp-cnbs --port 12345 --auth-token your-secret-token
 
 # Using environment variable
-MCP_CNBS_AUTH_TOKEN=your-secret-token npx @icen.ai/mcp-cnbs --port 12345
+MCP_CNBS_AUTH_TOKEN=your-secret-token npx mcp-cnbs --port 12345
 ```
 
 When authentication is enabled, requests must include:
@@ -210,7 +210,7 @@ npx wrangler secret put MCP_CNBS_AUTH_TOKEN
   "mcpServers": {
     "cnbs": {
       "command": "npx",
-      "args": ["@icen.ai/mcp-cnbs", "--port", "12345", "--auth-token", "your-secret-token"]
+      "args": ["mcp-cnbs", "--port", "12345", "--auth-token", "your-secret-token"]
     }
   }
 }
