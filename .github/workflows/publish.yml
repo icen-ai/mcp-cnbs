@@ -38,6 +38,4 @@ jobs:
           jq ".version = \"${{ steps.extract_version.outputs.VERSION }}\"" package.json > package.json.tmp && mv package.json.tmp package.json
 
       - name: Publish to npm (unscoped mcp-cnbs)
-        run: |
-          npm config delete //registry.npmjs.org/:_authToken || true  # ← 删掉空 token
-          npm publish --access public --provenance
+        run: npm publish --access public --provenance
