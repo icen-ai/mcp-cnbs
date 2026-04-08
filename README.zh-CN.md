@@ -51,7 +51,7 @@ mcp-cnbs
 {
   "mcpServers": {
     "cnbs": {
-      "url": "https://mcp.api-inference.modelscope.net/3d34f0e0c26a44/mcp"
+      "url": "https://mcp.api-inference.modelscope.net/c2ca6ece4e9946/mcp"
     }
   }
 }
