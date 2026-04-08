@@ -1,0 +1,53 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'  # 匹配 x.x.x 格式的标签
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整的 git 历史
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://registry.npmjs.org/'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build
+        run: npm run build
+      
+      - name: Extract version from tag
+        id: extract_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Update package.json version
+        run: |
+          # 使用 jq 工具更新版本号
+          jq ".version = \"${{ steps.extract_version.outputs.VERSION }}\"" package.json > package.json.tmp && mv package.json.tmp package.json
+          echo "Updated package.json version to ${{ steps.extract_version.outputs.VERSION }}"
+          cat package.json | grep version
+      
+      - name: Publish to npm (scoped)
+        run: |
+          # 确保是带命名空间的版本
+          sed -i 's/"name": "mcp-cnbs"/"name": "@icen.ai\/mcp-cnbs"/g' package.json
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      
+      - name: Publish to npm (unscoped)
+        run: |
+          # 修改为不带命名空间的包名
+          sed -i 's/"name": "@icen.ai\/mcp-cnbs"/"name": "mcp-cnbs"/g' package.json
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
