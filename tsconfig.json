@@ -14,7 +14,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "removeComments": false,
-    "types": ["@cloudflare/workers-types", "node"]
+    "types": ["@cloudflare/workers-types", "node", "jest"]
   },
   "include": [
     "src/**/*.ts"

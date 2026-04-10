@@ -72,7 +72,49 @@ mcp-cnbs
 
 ## 工具列表
 
-### 数据查询
+### 数据同步工具
+
+| 工具 | 功能 |
+|------|------|
+| `cnbs_sync_data` | 同步指定分类的数据 |
+| `cnbs_get_sync_status` | 获取数据同步状态 |
+| `cnbs_check_data_freshness` | 检查数据新鲜度 |
+
+### 数据源工具
+
+| 工具 | 功能 |
+|------|------|
+| `cnbs_list_data_sources` | 列出所有数据源 |
+| `cnbs_fetch_data_from_source` | 从指定数据源获取数据 |
+| `cnbs_get_source_categories` | 获取数据源的分类信息 |
+| `cnbs_search_in_source` | 在指定数据源中搜索数据 |
+
+### 数据质量工具
+
+| 工具 | 功能 |
+|------|------|
+| `cnbs_assess_data_quality` | 评估数据质量 |
+| `cnbs_analyze_trend` | 分析数据趋势 |
+| `cnbs_generate_summary` | 生成数据摘要 |
+| `cnbs_validate_data` | 验证数据有效性 |
+| `cnbs_enhanced_format_number` | 增强型数字格式化 |
+
+### 数据可视化和分析工具
+
+| 工具 | 功能 |
+|------|------|
+| `cnbs_generate_chart` | 生成图表配置 |
+| `cnbs_analyze_correlation` | 分析数据相关性 |
+| `cnbs_detect_anomalies` | 检测数据异常 |
+| `cnbs_analyze_statistics` | 分析数据统计信息 |
+| `cnbs_analyze_time_series` | 分析时间序列数据 |
+| `cnbs_predict_data` | 预测未来数据 |
+| `cnbs_normalize_data` | 数据归一化 |
+| `cnbs_standardize_data` | 数据标准化 |
+| `cnbs_moving_average` | 计算移动平均 |
+| `cnbs_exponential_smoothing` | 指数平滑处理 |
+
+### 传统数据查询工具
 
 | 工具 | 功能 |
 |------|------|
@@ -84,14 +126,14 @@ mcp-cnbs
 | `cnbs_batch_search` | 批量搜索多个关键词 |
 | `cnbs_compare` | 数据对比（地区对比/时间对比） |
 
-### 参考数据
+### 参考数据工具
 
 | 工具 | 功能 |
 |------|------|
 | `cnbs_get_regions` | 获取地区代码列表 |
 | `cnbs_get_categories` | 获取所有分类信息 |
 
-### 辅助功能
+### 辅助功能工具
 
 | 工具 | 功能 |
 |------|------|
@@ -102,6 +144,8 @@ mcp-cnbs
 | `cnbs_compute_stats` | 计算统计信息 |
 
 ## 快速示例
+
+### 传统数据查询
 
 ```
 // 查询 GDP
@@ -120,11 +164,131 @@ cnbs_compare(keyword="GDP", regions=["北京", "上海"], compareType="region")
 cnbs_get_regions(keyword="广东")
 ```
 
+### 数据同步
+
+```
+// 同步指定分类的数据
+cnbs_sync_data(categories=["1", "2"])
+
+// 获取数据同步状态
+cnbs_get_sync_status()
+
+// 检查数据新鲜度
+cnbs_check_data_freshness(setId="1")
+```
+
+### 数据源操作
+
+```
+// 列出所有数据源
+cnbs_list_data_sources()
+
+// 从普查数据源获取人口数据
+cnbs_fetch_data_from_source(source="census", params={"type": "population", "year": "2020"})
+
+// 获取国家统计局的分类信息
+cnbs_get_source_categories(source="cnbs")
+
+// 在国家统计局中搜索GDP数据
+cnbs_search_in_source(source="cnbs", keyword="GDP")
+```
+
+### 数据质量评估
+
+```
+// 评估数据质量
+cnbs_assess_data_quality(data=[{"value": "100"}, {"value": "200"}, {"value": "无数据"}])
+
+// 分析数据趋势
+cnbs_analyze_trend(values=[100, 110, 120, 130, 140])
+
+// 生成数据摘要
+cnbs_generate_summary(data=[{"value": "100"}, {"value": "200"}, {"value": "300"}])
+
+// 验证数据有效性
+cnbs_validate_data(data=[{"value": "100"}, {"value": "abc"}, {"value": ""}])
+
+// 增强型数字格式化
+cnbs_enhanced_format_number(value="123456", precision=2, format="compact")
+```
+
+### 数据可视化和分析
+
+```
+// 生成折线图配置
+cnbs_generate_chart(type="line", data={"series": [{"name": "GDP", "data": [100, 110, 120, 130, 140]}], "xAxis": {"data": ["2020", "2021", "2022", "2023", "2024"]}}, options={"title": "GDP趋势"})
+
+// 分析数据相关性
+cnbs_analyze_correlation(x=[1, 2, 3, 4, 5], y=[2, 4, 6, 8, 10])
+
+// 检测数据异常
+cnbs_detect_anomalies(data=[100, 110, 120, 500, 140])
+
+// 分析数据统计信息
+cnbs_analyze_statistics(data=[100, 110, 120, 130, 140])
+
+// 分析时间序列数据
+cnbs_analyze_time_series(data=[100, 110, 120, 130, 140], periods=["2020", "2021", "2022", "2023", "2024"])
+
+// 预测未来数据
+cnbs_predict_data(values=[100, 110, 120, 130, 140], futureSteps=3)
+
+// 数据归一化
+cnbs_normalize_data(data=[100, 200, 300, 400, 500])
+
+// 数据标准化
+cnbs_standardize_data(data=[100, 200, 300, 400, 500])
+
+// 计算移动平均
+cnbs_moving_average(data=[100, 110, 120, 130, 140], window=2)
+
+// 指数平滑处理
+cnbs_exponential_smoothing(data=[100, 110, 120, 130, 140], alpha=0.5)
+```
+
 ## 说明
 
 `cnbs_search` 返回的 `value` 字段有值。`cnbs_fetch_series` 返回的 `value` 字段可能为空，这是国家统计局 API 的限制。
 
 只需最新值时，用 `cnbs_search`。
+
+## 扩展数据源
+
+MCP 服务器现在支持多个数据源：
+
+| 数据源 | 描述 | 分类 |
+|--------|------|------|
+| `cnbs` | 国家统计局数据 | 月度、季度、年度、分省 |
+| `census` | 普查数据 | 人口普查、经济普查、农业普查 |
+| `international` | 国际数据 | 世界银行、IMF、OECD |
+| `department` | 部门数据 | 财政、工业、贸易、农业 |
+
+## 数据可视化
+
+MCP 服务器提供多种图表类型的配置生成：
+
+- 折线图
+- 柱状图
+- 饼图
+- 散点图
+- 雷达图
+- 热力图
+- 树图
+- 仪表盘
+
+生成的配置可以与前端图表库如 ECharts、Chart.js 或 D3.js 一起使用。
+
+## 数据分析
+
+MCP 服务器包含多种数据分析工具：
+
+- 趋势分析
+- 相关性分析
+- 异常检测
+- 统计分析
+- 时间序列分析
+- 预测
+- 数据转换（归一化、标准化、移动平均、指数平滑）
 
 ## 分类代码
 

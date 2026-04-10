@@ -1,7 +1,7 @@
 import axios from 'axios';
 import https from 'https';
-import { cnbsCacheHub } from './cache.js';
-import { CnbsErrorHandler, cnbsRequestThrottler } from './error.js';
+import { cnbsCacheHub, CacheKeyGenerator } from './cache';
+import { CnbsErrorHandler, cnbsRequestThrottler, CnbsBoundaryHandler } from './error';
 
 const httpsAgent = new https.Agent({
   rejectUnauthorized: false,
@@ -14,13 +14,14 @@ const axiosConfig = {
   maxRedirects: 5,
   proxy: false as const,
 };
+
 import {
   CNBS_API_BASE,
   CNBS_NODE_CACHE_TTL,
   CNBS_METRIC_CACHE_TTL,
   CNBS_DATA_CACHE_TTL,
   CNBS_DEFAULT_ROOT
-} from '../constants.js';
+} from '../constants';
 import {
   CnbsSeriesQuery,
   CnbsNodeQuery,
@@ -33,7 +34,38 @@ import {
   LegacyParsedResult,
   LegacyCategoryResponse,
   LegacyPeriodResponse,
-} from '../types/index.js';
+  CnbsDataSyncOptions,
+  CnbsSyncResult
+} from '../types/index';
+
+// 数据同步状态管理
+class DataSyncManager {
+  private syncStatus: Map<string, {
+    lastSync: number;
+    status: 'idle' | 'syncing' | 'completed' | 'failed';
+    error?: string;
+  }> = new Map();
+
+  getSyncStatus(key: string) {
+    return this.syncStatus.get(key);
+  }
+
+  setSyncStatus(key: string, status: 'idle' | 'syncing' | 'completed' | 'failed', error?: string) {
+    this.syncStatus.set(key, {
+      lastSync: Date.now(),
+      status,
+      error
+    });
+  }
+
+  isSyncNeeded(key: string, minInterval: number = 3600000) {
+    const status = this.syncStatus.get(key);
+    if (!status) return true;
+    return Date.now() - status.lastSync > minInterval;
+  }
+}
+
+const dataSyncManager = new DataSyncManager();
 
 export class CnbsLegacyClient {
   private baseUrl = 'https://data.stats.gov.cn';
@@ -64,7 +96,7 @@ export class CnbsLegacyClient {
   }
 
   processFindResult(result: LegacySearchResult): LegacyParsedResult[] {
-    return result.results.map(item => {
+    return result.results.map((item: { report: string; metric: any; data: any; period: any; db: any; }) => {
       const reportParams = Object.fromEntries(
         item.report.split('&').map(p => {
           const [key, value] = p.split('=');
@@ -284,6 +316,18 @@ export class CnbsModernClient {
   }
 
   async findItems(params: CnbsSearchQuery): Promise<any> {
+    const cacheKey = CacheKeyGenerator.generateSearchKey(
+      params.keyword,
+      params.pageNum || 1,
+      params.pageSize || 10
+    );
+    
+    const cached = this.nodeCache.fetch(cacheKey);
+    if (cached) {
+      console.error(`Search cache hit for ${cacheKey}`);
+      return cached;
+    }
+
     return cnbsRequestThrottler.execute(async () => {
       return CnbsErrorHandler.retryWithBackoff(async () => {
         const url = new URL(`${this.baseUrl}/query`);
@@ -299,6 +343,9 @@ export class CnbsModernClient {
         });
 
         console.error(`Response status:`, response.status);
+        
+        // 缓存搜索结果
+        this.nodeCache.store(cacheKey, response.data, CNBS_NODE_CACHE_TTL);
         return response.data;
       });
     });
@@ -306,8 +353,23 @@ export class CnbsModernClient {
 
   async batchFindItems(keywords: string[], pageSize: number = 5): Promise<Record<string, any>> {
     const results: Record<string, any> = {};
+    const cacheKeys: string[] = [];
+    const uncachedKeywords: string[] = [];
     
+    // 先尝试从缓存获取
     for (const keyword of keywords) {
+      const cacheKey = CacheKeyGenerator.generateSearchKey(keyword, 1, pageSize);
+      cacheKeys.push(cacheKey);
+      const cached = this.nodeCache.fetch(cacheKey);
+      if (cached) {
+        results[keyword] = cached;
+      } else {
+        uncachedKeywords.push(keyword);
+      }
+    }
+    
+    // 批量请求未缓存的关键词
+    for (const keyword of uncachedKeywords) {
       try {
         const result = await this.findItems({ keyword, pageSize });
         results[keyword] = result;
@@ -320,7 +382,7 @@ export class CnbsModernClient {
   }
 
   async fetchNodes(params: CnbsNodeQuery): Promise<any> {
-    const cacheKey = `node_${params.category}_${params.parentId || 'root'}`;
+    const cacheKey = CacheKeyGenerator.generateNodeKey(params.category, params.parentId);
     const cached = this.nodeCache.fetch(cacheKey);
     if (cached) {
       console.error(`Node cache hit for ${cacheKey}`);
@@ -354,21 +416,21 @@ export class CnbsModernClient {
 
     const fetchRecursively = async (parentId?: string) => {
       try {
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 200)); // 减少请求间隔
 
         const response = await this.fetchNodes({ parentId, category });
-        const nodes = response.data || [];
+        const nodes = CnbsBoundaryHandler.safePropertyAccess(response, 'data', []);
 
         for (const node of nodes) {
-          if (node.isLeaf) {
+          if ((node as any).isLeaf) {
             allEnds.push(node);
           } else {
-            await fetchRecursively(node._id);
+            await fetchRecursively((node as any)._id);
           }
         }
       } catch (error) {
         console.error(`Error in recursive node traversal for parentId=${parentId}:`, error);
-        throw error;
+        // 继续执行，不中断整个流程
       }
     };
 
@@ -377,7 +439,7 @@ export class CnbsModernClient {
   }
 
   async fetchMetrics(params: CnbsMetricQuery): Promise<any> {
-    const cacheKey = `metric_${params.setId}`;
+    const cacheKey = CacheKeyGenerator.generateMetricKey(params.setId, params.name);
     const cached = this.metricCache.fetch(cacheKey);
     if (cached) {
       console.error(`Metric cache hit for ${cacheKey}`);
@@ -408,9 +470,14 @@ export class CnbsModernClient {
       });
     });
   }
-        
+
   async fetchSeries(params: CnbsSeriesQuery): Promise<any> {
-    const cacheKey = `series_${params.setId}_${params.metricIds.join('_')}_${params.periods.join('_')}_${params.areas?.map(a => a.code).join('_') || '000000000000'}`;
+    const cacheKey = CacheKeyGenerator.generateSeriesKey(
+      params.setId,
+      params.metricIds,
+      params.periods,
+      params.areas
+    );
 
     const cachedData = this.seriesCache.fetch(cacheKey);
     if (cachedData) {
@@ -423,7 +490,7 @@ export class CnbsModernClient {
         const payload = {
           cid: params.setId,
           indicatorIds: params.metricIds,
-          das: params.areas,
+          das: params.areas || [{ text: '全国', code: '000000000000' }],
           dts: params.periods,
           showType: params.displayMode || '1',
           rootId: params.rootId || this.rootId,
@@ -449,6 +516,30 @@ export class CnbsModernClient {
         return response.data;
       });
     });
+  }
+
+  // 批量获取数据系列
+  async batchFetchSeries(queries: CnbsSeriesQuery[]): Promise<Array<{
+    query: CnbsSeriesQuery;
+    result: any;
+    error?: string;
+  }>> {
+    const results = [];
+    
+    for (const query of queries) {
+      try {
+        const result = await this.fetchSeries(query);
+        results.push({ query, result });
+      } catch (error) {
+        results.push({ 
+          query, 
+          result: null, 
+          error: (error as Error).message 
+        });
+      }
+    }
+    
+    return results;
   }
 
   async findAndFetch(
@@ -536,5 +627,189 @@ export class CnbsModernClient {
 
   fetchRootId(): string {
     return this.rootId;
+  }
+
+  // 数据同步方法
+  async syncData(options: CnbsDataSyncOptions = {}): Promise<CnbsSyncResult> {
+    const { categories = ['1', '2', '3', '5', '6'], forceSync = false } = options;
+    const syncResults: CnbsSyncResult['results'] = {};
+    let successCount = 0;
+    let failedCount = 0;
+
+    for (const category of categories) {
+      const syncKey = `category_${category}`;
+      
+      if (!forceSync && !dataSyncManager.isSyncNeeded(syncKey)) {
+        syncResults[category] = {
+          status: 'skipped',
+          message: 'Sync not needed (recently synced)'
+        };
+        continue;
+      }
+
+      dataSyncManager.setSyncStatus(syncKey, 'syncing');
+      
+      try {
+        // 同步分类节点
+        const nodes = await this.fetchAllEndNodes(category as CnbsCategory);
+        
+        // 为每个叶子节点同步指标
+        for (const node of nodes) {
+          if (node.isLeaf) {
+            try {
+              await this.fetchMetrics({ setId: node._id });
+            } catch (error) {
+              console.error(`Failed to sync metrics for setId ${node._id}:`, error);
+            }
+          }
+        }
+
+        syncResults[category] = {
+          status: 'success',
+          message: `Synced ${nodes.length} nodes`,
+          data: { nodeCount: nodes.length }
+        };
+        dataSyncManager.setSyncStatus(syncKey, 'completed');
+        successCount++;
+      } catch (error) {
+        const errorMessage = (error as Error).message;
+        syncResults[category] = {
+          status: 'failed',
+          message: errorMessage
+        };
+        dataSyncManager.setSyncStatus(syncKey, 'failed', errorMessage);
+        failedCount++;
+      }
+    }
+
+    return {
+      overallStatus: failedCount > 0 ? 'partial' : 'success',
+      successCount,
+      failedCount,
+      results: syncResults
+    };
+  }
+
+  // 批量同步时间序列数据
+  async syncTimeSeries(setId: string, metricIds: string[], periods: string[], areas: Array<{ text: string; code: string }> = [{ text: '全国', code: '000000000000' }]): Promise<any> {
+    try {
+      const result = await this.fetchSeries({
+        setId,
+        metricIds,
+        periods,
+        areas
+      });
+      return {
+        status: 'success',
+        data: result
+      };
+    } catch (error) {
+      return {
+        status: 'failed',
+        error: (error as Error).message
+      };
+    }
+  }
+
+  // 获取同步状态
+  getSyncStatus(category?: string): any {
+    if (category) {
+      return dataSyncManager.getSyncStatus(`category_${category}`);
+    }
+    
+    // 返回所有分类的同步状态
+    const status: Record<string, any> = {};
+    ['1', '2', '3', '5', '6'].forEach(cat => {
+      status[cat] = dataSyncManager.getSyncStatus(`category_${cat}`);
+    });
+    return status;
+  }
+
+  // 检查数据新鲜度
+  async checkDataFreshness(setId: string): Promise<{ isFresh: boolean; lastUpdated: number | null }> {
+    const cacheKey = `metric_${setId}`;
+    const cached = this.metricCache.fetch(cacheKey);
+    
+    if (!cached) {
+      return { isFresh: false, lastUpdated: null };
+    }
+    
+    const cacheInfo = this.metricCache.getCacheInfo(cacheKey);
+    const lastUpdated = cacheInfo?.timestamp || null;
+    const isFresh = lastUpdated && (Date.now() - lastUpdated) < CNBS_METRIC_CACHE_TTL;
+    
+    return { isFresh, lastUpdated };
+  }
+}
+
+// 扩展数据源接口
+export interface DataSource {
+  name: string;
+  description: string;
+  fetchData(params: any): Promise<any>;
+  getCategories(): Promise<any[]>;
+  search(keyword: string): Promise<any>;
+}
+
+// 普查数据数据源
+export class CensusDataSource implements DataSource {
+  name = 'census';
+  description = '国家统计局普查数据';
+  
+  async fetchData(params: any): Promise<any> {
+    // 实现普查数据获取逻辑
+    throw new Error('Not implemented yet');
+  }
+  
+  async getCategories(): Promise<any[]> {
+    // 实现普查数据分类获取逻辑
+    throw new Error('Not implemented yet');
+  }
+  
+  async search(keyword: string): Promise<any> {
+    // 实现普查数据搜索逻辑
+    throw new Error('Not implemented yet');
+  }
+}
+
+// 国际数据数据源
+export class InternationalDataSource implements DataSource {
+  name = 'international';
+  description = '国际统计数据';
+  
+  async fetchData(params: any): Promise<any> {
+    // 实现国际数据获取逻辑
+    throw new Error('Not implemented yet');
+  }
+  
+  async getCategories(): Promise<any[]> {
+    // 实现国际数据分类获取逻辑
+    throw new Error('Not implemented yet');
+  }
+  
+  async search(keyword: string): Promise<any> {
+    // 实现国际数据搜索逻辑
+    throw new Error('Not implemented yet');
+  }
+}
+
+// 部门数据数据源
+export class DepartmentDataSource implements DataSource {
+  name = 'department';
+  description = '各部门统计数据';
+  
+  async fetchData(params: any): Promise<any> {
+    // 实现部门数据获取逻辑
+    throw new Error('Not implemented yet');
+  }
+  
+  async getCategories(): Promise<any[]> {
+    // 实现部门数据分类获取逻辑
+    throw new Error('Not implemented yet');
+  }
+  
+  async search(keyword: string): Promise<any> {
+    // 实现部门数据搜索逻辑
+    throw new Error('Not implemented yet');
   }
 }

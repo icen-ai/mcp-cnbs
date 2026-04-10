@@ -197,3 +197,51 @@ export interface LegacyPeriodResponse {
     }>;
   }>;
 }
+
+// 数据同步相关类型
+export interface CnbsDataSyncOptions {
+  categories?: string[];
+  forceSync?: boolean;
+  timeout?: number;
+}
+
+export interface CnbsSyncResultItem {
+  status: 'success' | 'failed' | 'skipped';
+  message: string;
+  data?: any;
+}
+
+export interface CnbsSyncResult {
+  overallStatus: 'success' | 'partial' | 'failed';
+  successCount: number;
+  failedCount: number;
+  results: Record<string, CnbsSyncResultItem>;
+  [key: string]: any;
+}
+
+// 数据源相关类型
+export interface DataSourceInfo {
+  name: string;
+  description: string;
+  categories: string[];
+  status: 'active' | 'inactive';
+  lastUpdated?: number;
+}
+
+// 数据质量相关类型
+export interface DataQualityInfo {
+  freshness: 'fresh' | 'stale' | 'unknown';
+  completeness: number;
+  accuracy: number;
+  lastUpdated: number;
+}
+
+// 缓存信息类型
+export interface CacheInfo {
+  key: string;
+  timestamp: number;
+  size: number;
+  ttl: number;
+  hits: number;
+  misses: number;
+}

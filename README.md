@@ -91,6 +91,49 @@ Add to your MCP client configuration file:
 | `cnbs_get_regions` | Get available region codes and names |
 | `cnbs_get_categories` | Get all data category information |
 
+### Data Synchronization
+
+| Tool | Description |
+|------|-------------|
+| `cnbs_sync_data` | Sync data from CNBS API |
+| `cnbs_get_sync_status` | Get data sync status |
+| `cnbs_check_data_freshness` | Check data freshness |
+
+### Data Sources
+
+| Tool | Description |
+|------|-------------|
+| `cnbs_list_data_sources` | List available data sources |
+| `cnbs_fetch_data_from_source` | Fetch data from specific source |
+| `cnbs_get_source_categories` | Get categories for specific source |
+| `cnbs_search_in_source` | Search in specific data source |
+
+### Data Quality
+
+| Tool | Description |
+|------|-------------|
+| `cnbs_assess_data_quality` | Assess data quality |
+| `cnbs_analyze_trend` | Analyze data trend |
+| `cnbs_generate_summary` | Generate data summary |
+| `cnbs_validate_data` | Validate and clean data |
+| `cnbs_enhanced_format_number` | Enhanced number formatting |
+
+### Data Visualization and Analysis
+
+| Tool | Description |
+|------|-------------|
+| `cnbs_generate_chart` | Generate chart configuration |
+| `cnbs_analyze_trend` | Analyze data trend |
+| `cnbs_analyze_correlation` | Analyze data correlation |
+| `cnbs_detect_anomalies` | Detect data anomalies |
+| `cnbs_analyze_statistics` | Analyze data statistics |
+| `cnbs_analyze_time_series` | Analyze time series data |
+| `cnbs_predict_data` | Predict future values |
+| `cnbs_normalize_data` | Normalize data |
+| `cnbs_standardize_data` | Standardize data (Z-score) |
+| `cnbs_moving_average` | Calculate moving average |
+| `cnbs_exponential_smoothing` | Apply exponential smoothing |
+
 ### Utilities
 
 | Tool | Description |
@@ -118,6 +161,33 @@ cnbs_compare(keyword="GDP", regions=["北京", "上海"], compareType="region")
 
 // Get region codes
 cnbs_get_regions(keyword="广东")
+
+// Data synchronization
+cnbs_sync_data(categories=["1", "2", "3"])
+
+// Get sync status
+cnbs_get_sync_status()
+
+// Check data freshness
+cnbs_check_data_freshness(setId="some_set_id")
+
+// List data sources
+cnbs_list_data_sources()
+
+// Fetch data from specific source
+cnbs_fetch_data_from_source(source="census", params={type: "population", year: "2020"})
+
+// Analyze data trend
+cnbs_analyze_trend(values=[100, 110, 120, 130, 140])
+
+// Generate chart configuration
+cnbs_generate_chart(type="line", data={series: [{name: "GDP", data: [100, 110, 120, 130, 140]}], xAxis: {data: ["2020", "2021", "2022", "2023", "2024"]}}, options={title: "GDP趋势"})
+
+// Predict future values
+cnbs_predict_data(values=[100, 110, 120, 130, 140], futureSteps=3)
+
+// Assess data quality
+cnbs_assess_data_quality(data=[{value: "100"}, {value: "200"}, {value: "无数据"}])
 ```
 
 ## Notes
@@ -125,6 +195,44 @@ cnbs_get_regions(keyword="广东")
 `cnbs_search` returns `value` field with data. `cnbs_fetch_series` may return empty `value` - this is an API limitation.
 
 For latest values, use `cnbs_search`.
+
+## Extended Data Sources
+
+The MCP server now supports multiple data sources:
+
+| Source | Description | Categories |
+|--------|-------------|------------|
+| `cnbs` | National Bureau of Statistics data | Monthly, Quarterly, Yearly, Provincial |
+| `census` | Census data | Population, Economic, Agriculture |
+| `international` | International data | World Bank, IMF, OECD |
+| `department` | Departmental data | Finance, Industry, Trade, Agriculture |
+
+## Data Visualization
+
+The MCP server provides chart configuration generation for various chart types:
+
+- Line chart
+- Bar chart
+- Pie chart
+- Scatter chart
+- Radar chart
+- Heatmap
+- Treemap
+- Gauge
+
+The generated configuration can be used with frontend chart libraries like ECharts, Chart.js, or D3.js.
+
+## Data Analysis
+
+The MCP server includes various data analysis tools:
+
+- Trend analysis
+- Correlation analysis
+- Anomaly detection
+- Statistical analysis
+- Time series analysis
+- Prediction
+- Data transformation (normalization, standardization, moving average, exponential smoothing)
 
 ## Category Codes
 
