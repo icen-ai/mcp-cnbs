@@ -1,47 +1,98 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerCnbsTools } from './tools/index.js';
+import { cnbsCacheHub } from './services/cache.js';
 
-const CNBS_VERSION = '1.0.0';
+const CNBS_VERSION = '1.1.0';
 
-export function createCnbsServer() {
+export interface CnbsServerConfig {
+  /** FRED API Key，优先级高于 FRED_API_KEY 环境变量。通过 X-Fred-Api-Key 请求头传入。 */
+  fredApiKey?: string;
+}
+
+export function createCnbsServer(config?: CnbsServerConfig) {
   const server = new McpServer({
     name: 'mcp-cnbs',
     version: CNBS_VERSION,
+    description: '中国国家统计局数据 MCP 服务器，支持 NBS 常规统计、普查、世界银行、IMF、OECD、BIS、FRED 等多源数据'
   });
 
   (server as any).instructions = `
-该服务用于查询中国国家统计局的统计数据（基于 UUID 标识符的新版 API）。
+# 中国国家统计局 + 国际多源统计数据 MCP 服务器 v${CNBS_VERSION}
 
-数据查询三步走：
-1. cnbs_search - 关键词搜索, 找到目标数据集的 setId
-2. cnbs_fetch_metrics - 根据 setId 获取指标列表, 找到 metricId
-3. cnbs_fetch_series - 用 setId + metricId + 时间范围查询具体数据
+支持 NBS 国内数据、世界银行、IMF、OECD、BIS、FRED（美联储）、NBS 普查和部门统计，全部对接真实 API。
 
-核心工具说明：
-- cnbs_search(keyword, sortBy, sortOrder, categories, periodRange): 关键词搜索, 支持排序和过滤
-- cnbs_fetch_nodes(category, parentId?): 浏览分类树, category=1月度/2季度/3年度/5分省季度/6分省年度/7其他。isEnd=true 的 id 即为 setId
-- cnbs_fetch_metrics(setId): 获取某数据集下的所有指标
-- cnbs_fetch_series(setId, metricIds, periods, areas?): 核心数据查询接口
-- cnbs_fetch_end_nodes(category): 递归获取所有叶子节点（耗时, 不建议频繁用）
-- cnbs_format_number(value, precision): 格式化数据值, 支持设置精度
-- cnbs_transform_unit(value, sourceUnit, targetUnit): 在不同单位之间转换数据值
-- cnbs_compute_stats(values): 计算数据的基本统计信息
-- cnbs_get_cache_stats(): 获取缓存使用情况
-- cnbs_flush_caches(): 清除所有缓存数据
+## 数据源
+- NBS 常规数据：月度/季度/年度/分省（cnbs_* 工具）
+- 世界银行：200+ 国家 GDP/贸易/人口等（ext_world_bank*）
+- IMF DataMapper：WEO 预测/政府债务等（ext_imf*）
+- OECD SDMX：季度GDP/就业/先行指标（ext_oecd*）
+- BIS：有效汇率/信贷缺口/房价（ext_bis*）
+- FRED：美国利率/汇率/大宗商品（ext_fred* | 需 X-Fred-Api-Key 请求头）
+- NBS 普查：人口/经济/农业普查（ext_cn_census）
+- NBS 部门：财政/工信/商务/农业/央行/社保/房地产/能源（ext_cn_department*）
 
-时间格式：
-- 月度: YYYYMM, 如 202501, 后缀 MM
-- 季度: YYYYQ, 如 20254, 后缀 SS
-- 年度: YYYY, 如 2025, 后缀 YY
-- 范围: Start-End, 如 202501MM-202503MM
+## FRED 使用说明
+在 MCP 客户端配置中添加请求头 X-Fred-Api-Key: <your_key>
+API Key 免费申请：https://fred.stlouisfed.org/docs/api/api_key.html
 
-地区代码：
-- 000000000000 = 全国
-
----
-author's blog is https://log.cns.red
+## 推荐工作流
+- 国内最新值：cnbs_search(keyword="GDP")
+- 国际对比：ext_world_bank(indicator="GDP_GROWTH", countries=["CHN","USA","DEU"])
+- 中美双源核验：ext_global_compare(wbIndicator="GDP_GROWTH", imfIndicator="GDP_GROWTH", countries=["CHN","USA"])
+- 调用 cnbs_get_guide() 获取完整工具指南
 `;
 
-  registerCnbsTools(server);
+  // 注册健康检查资源
+  server.registerResource(
+    'health',
+    '/health',
+    {},
+    async (uri, extra) => {
+      return {
+        contents: [
+          {
+            uri: uri.toString(),
+            text: JSON.stringify({
+              status: 'ok',
+              timestamp: new Date().toISOString(),
+              version: CNBS_VERSION,
+              cacheStatus: cnbsCacheHub.getAllStats()
+            }),
+            mimeType: 'application/json'
+          }
+        ]
+      };
+    }
+  );
+
+  // 注册服务器信息资源
+  server.registerResource(
+    'info',
+    '/info',
+    {},
+    async (uri, extra) => {
+      return {
+        contents: [
+          {
+            uri: uri.toString(),
+            text: JSON.stringify({
+              name: 'mcp-cnbs',
+              version: CNBS_VERSION,
+              description: '中国国家统计局 + 国际多源统计数据 MCP 服务器',
+              capabilities: {
+                dataSources: ['cnbs', 'world_bank', 'imf', 'oecd', 'bis', 'fred', 'census', 'department'],
+                fredEnabled: !!(config?.fredApiKey || process.env.FRED_API_KEY),
+              },
+              uptime: process.uptime(),
+              timestamp: new Date().toISOString()
+            }),
+            mimeType: 'application/json'
+          }
+        ]
+      };
+    }
+  );
+
+  registerCnbsTools(server, config);
   return server;
 }

@@ -34,7 +34,7 @@ function checkAuth(authToken: string | undefined, authHeader: string | undefined
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, X-Fred-Api-Key',
 };
 
 async function launchCnbsServer() {
@@ -63,6 +63,7 @@ async function launchCnbsServer() {
 
     const server = http.createServer(async (req, res) => {
       const url = new URL(req.url || '/', `http://${req.headers.host}`);
+      const fredApiKey = req.headers['x-fred-api-key'] as string | undefined;
 
       if (req.method === 'OPTIONS') {
         res.writeHead(204, corsHeaders);
@@ -100,7 +101,7 @@ async function launchCnbsServer() {
           sseTransports.delete(transport.sessionId);
         });
 
-        const mcpServer = createCnbsServer();
+        const mcpServer = createCnbsServer({ fredApiKey });
         await mcpServer.connect(transport);
         return;
       }
@@ -294,7 +295,7 @@ async function launchCnbsServer() {
             }
           };
 
-          const mcpServer = createCnbsServer();
+          const mcpServer = createCnbsServer({ fredApiKey });
           await mcpServer.connect(transport);
           await transport.handleRequest(req, res, body);
           return;
@@ -322,7 +323,7 @@ async function launchCnbsServer() {
       res.writeHead(404, { 'Content-Type': 'application/json', ...corsHeaders });
       res.end(JSON.stringify({
         jsonrpc: '2.0',
-        error: { code: -32601, message: 'Method not found. Use POST / for Streamable HTTP or GET /sse for SSE.' },
+        error: { code: -32601, message: 'Method not found. Use POST / or POST /mcp for Streamable HTTP, or GET /sse for legacy SSE.' },
         id: null
       }));
     });
