@@ -113,9 +113,9 @@ mcp-cnbs
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/` | POST | Streamable HTTP — 初始化会话或发送请求 |
-| `/` | GET | SSE 通知流（需携带 `Mcp-Session-Id` 请求头） |
-| `/` | DELETE | 终止会话（需携带 `Mcp-Session-Id` 请求头） |
+| `/` 或 `/mcp` | POST | Streamable HTTP — 初始化会话或发送请求 |
+| `/` 或 `/mcp` | GET | SSE 通知流（需携带 `Mcp-Session-Id` 请求头） |
+| `/` 或 `/mcp` | DELETE | 终止会话（需携带 `Mcp-Session-Id` 请求头） |
 | `/sse` | GET | 旧版 SSE 模式 |
 | `/message` | POST | 旧版 SSE 消息 |
 

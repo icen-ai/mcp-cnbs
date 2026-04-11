@@ -115,9 +115,9 @@ With FRED support (stdio mode — env var fallback):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | POST | Streamable HTTP — initialize session or send requests |
-| `/` | GET | SSE notification stream (requires `Mcp-Session-Id` header) |
-| `/` | DELETE | Terminate session (requires `Mcp-Session-Id` header) |
+| `/` or `/mcp` | POST | Streamable HTTP — initialize session or send requests |
+| `/` or `/mcp` | GET | SSE notification stream (requires `Mcp-Session-Id` header) |
+| `/` or `/mcp` | DELETE | Terminate session (requires `Mcp-Session-Id` header) |
 | `/sse` | GET | Legacy SSE mode |
 | `/message` | POST | Legacy SSE messages |
 

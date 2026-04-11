@@ -323,7 +323,7 @@ async function launchCnbsServer() {
       res.writeHead(404, { 'Content-Type': 'application/json', ...corsHeaders });
       res.end(JSON.stringify({
         jsonrpc: '2.0',
-        error: { code: -32601, message: 'Method not found. Use POST / for Streamable HTTP or GET /sse for SSE.' },
+        error: { code: -32601, message: 'Method not found. Use POST / or POST /mcp for Streamable HTTP, or GET /sse for legacy SSE.' },
         id: null
       }));
     });
