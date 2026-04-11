@@ -1004,9 +1004,9 @@ Returns:
         forceSync: z.boolean().optional().default(false).describe('是否强制同步'),
       }).strict(),
       annotations: {
-        readOnlyHint: true,
+        readOnlyHint: false,
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: true,
       },
     },
@@ -1226,14 +1226,16 @@ Returns:
     {
       title: 'Fetch Data from Specific Source',
       description: `从特定数据源获取数据，支持扩展数据源。
-      
+
 Args:
   - source (string): 数据源名称，如 "cnbs"、"census"、"international"、"department"
   - params (object): 数据源特定的参数
 
 Returns:
   数据源返回的数据
-  
+
+⚠️ FRED 注意：通过此工具调用 source="fred" 时，仅支持 FRED_API_KEY 环境变量，不支持 X-Fred-Api-Key 请求头。HTTP 模式请改用专用工具 ext_fred。
+
 示例：
   cnbs_fetch_data_from_source(source="cnbs", params={keyword: "GDP"})
   cnbs_fetch_data_from_source(source="census", params={type: "population", year: "2020"})
