@@ -1,6 +1,6 @@
 {
   "name": "mcp-cnbs",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "MCP server for China National Bureau of Statistics (CNBS) data access",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,7 +19,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsup",
     "start": "node dist/index.js --port 12345",
     "dev": "bun run --watch src/index.ts --port 12345",
     "clean": "rm -rf dist",
@@ -72,6 +72,7 @@
     "@types/node": "^20.19.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.1.2",
+    "tsup": "^8.5.1",
     "typescript": "^5.3.0"
   }
 }

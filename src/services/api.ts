@@ -1,7 +1,7 @@
 import axios from 'axios';
 import https from 'https';
 import { cnbsCacheHub, CacheKeyGenerator } from './cache';
-import { CnbsErrorHandler, cnbsRequestThrottler, CnbsBoundaryHandler } from './error';
+import { CnbsErrorHandler, CnbsErrorType, cnbsRequestThrottler, CnbsBoundaryHandler } from './error';
 
 const httpsAgent = new https.Agent({
   rejectUnauthorized: false,
@@ -14,6 +14,63 @@ const axiosConfig = {
   maxRedirects: 5,
   proxy: false as const,
 };
+
+function truncateSnippet(value: unknown, maxLength: number = 240): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized ? normalized.slice(0, maxLength) : undefined;
+}
+
+function looksLikeHtmlPayload(data: unknown): boolean {
+  if (typeof data !== 'string') {
+    return false;
+  }
+
+  const sample = data.trim().slice(0, 256).toLowerCase();
+  return sample.startsWith('<!doctype html') || sample.startsWith('<html') || sample.includes('<script');
+}
+
+function looksLikeWafChallenge(data: unknown, headers: Record<string, unknown>): boolean {
+  const snippet = typeof data === 'string' ? data.toLowerCase() : '';
+  return Boolean(
+    headers['wzws-ray'] ||
+    snippet.includes('please enable javascript and refresh the page') ||
+    snippet.includes('waf') ||
+    snippet.includes('challenge')
+  );
+}
+
+function validateCnbsApiResponse(
+  endpoint: string,
+  response: { status: number; headers: Record<string, unknown>; data: unknown }
+): void {
+  const contentType = String(response.headers['content-type'] || '');
+  const rawSnippet = truncateSnippet(response.data);
+
+  if (contentType.includes('text/html') || looksLikeHtmlPayload(response.data)) {
+    const blockedByWaf = looksLikeWafChallenge(response.data, response.headers);
+    throw CnbsErrorHandler.createServiceError({
+      type: blockedByWaf ? CnbsErrorType.ACCESS_BLOCKED : CnbsErrorType.API_FAILURE,
+      message: blockedByWaf
+        ? 'CNBS upstream returned an anti-bot or browser challenge page instead of JSON data.'
+        : 'CNBS upstream returned HTML instead of the expected JSON payload.',
+      canRetry: false,
+      endpoint,
+      status: response.status,
+      contentType,
+      rawSnippet,
+      hints: blockedByWaf
+        ? [
+            'This endpoint appears to be protected by WAF or anti-bot logic.',
+            'Calls that depend on CNBS search may fail until the upstream service allows server-side access.'
+          ]
+        : ['The upstream response format changed or the request was redirected to a non-API page.'],
+    });
+  }
+}
 
 import {
   CNBS_API_BASE,
@@ -342,6 +399,7 @@ export class CnbsModernClient {
           timeout: this.timeout,
         });
 
+        validateCnbsApiResponse(url.toString(), response);
         console.error(`Response status:`, response.status);
         
         // 缓存搜索结果
@@ -404,6 +462,7 @@ export class CnbsModernClient {
           timeout: this.timeout,
         });
 
+        validateCnbsApiResponse(url.toString(), response);
         this.nodeCache.store(cacheKey, response.data, CNBS_NODE_CACHE_TTL);
 
         return response.data;
@@ -464,6 +523,7 @@ export class CnbsModernClient {
           timeout: this.timeout,
         });
 
+        validateCnbsApiResponse(url.toString(), response);
         this.metricCache.store(cacheKey, response.data, CNBS_METRIC_CACHE_TTL);
 
         return response.data;
@@ -511,6 +571,7 @@ export class CnbsModernClient {
           }
         );
 
+        validateCnbsApiResponse(`${this.baseUrl}/getEsDataByCidAndDt`, response);
         this.seriesCache.store(cacheKey, response.data, CNBS_DATA_CACHE_TTL);
 
         return response.data;
@@ -749,67 +810,4 @@ export interface DataSource {
   fetchData(params: any): Promise<any>;
   getCategories(): Promise<any[]>;
   search(keyword: string): Promise<any>;
-}
-
-// 普查数据数据源
-export class CensusDataSource implements DataSource {
-  name = 'census';
-  description = '国家统计局普查数据';
-  
-  async fetchData(params: any): Promise<any> {
-    // 实现普查数据获取逻辑
-    throw new Error('Not implemented yet');
-  }
-  
-  async getCategories(): Promise<any[]> {
-    // 实现普查数据分类获取逻辑
-    throw new Error('Not implemented yet');
-  }
-  
-  async search(keyword: string): Promise<any> {
-    // 实现普查数据搜索逻辑
-    throw new Error('Not implemented yet');
-  }
-}
-
-// 国际数据数据源
-export class InternationalDataSource implements DataSource {
-  name = 'international';
-  description = '国际统计数据';
-  
-  async fetchData(params: any): Promise<any> {
-    // 实现国际数据获取逻辑
-    throw new Error('Not implemented yet');
-  }
-  
-  async getCategories(): Promise<any[]> {
-    // 实现国际数据分类获取逻辑
-    throw new Error('Not implemented yet');
-  }
-  
-  async search(keyword: string): Promise<any> {
-    // 实现国际数据搜索逻辑
-    throw new Error('Not implemented yet');
-  }
-}
-
-// 部门数据数据源
-export class DepartmentDataSource implements DataSource {
-  name = 'department';
-  description = '各部门统计数据';
-  
-  async fetchData(params: any): Promise<any> {
-    // 实现部门数据获取逻辑
-    throw new Error('Not implemented yet');
-  }
-  
-  async getCategories(): Promise<any[]> {
-    // 实现部门数据分类获取逻辑
-    throw new Error('Not implemented yet');
-  }
-  
-  async search(keyword: string): Promise<any> {
-    // 实现部门数据搜索逻辑
-    throw new Error('Not implemented yet');
-  }
 }

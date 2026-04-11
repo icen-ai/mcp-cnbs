@@ -5,6 +5,7 @@ export enum CnbsErrorType {
   TIMEOUT_ISSUE = 'TIMEOUT_ISSUE',
   RATE_LIMIT = 'RATE_LIMIT',
   DATA_ISSUE = 'DATA_ISSUE',
+  ACCESS_BLOCKED = 'ACCESS_BLOCKED',
   VALIDATION_ERROR = 'VALIDATION_ERROR',
   CACHE_ERROR = 'CACHE_ERROR',
   THROTTLE_ERROR = 'THROTTLE_ERROR',
@@ -17,9 +18,26 @@ export interface CnbsErrorDetails {
   message: string;
   source?: any;
   canRetry: boolean;
+  code?: string;
+  endpoint?: string;
+  status?: number;
+  contentType?: string;
+  tool?: string;
   attempt?: number;
   maxAttempts?: number;
   retryAfter?: number;
+  hints?: string[];
+  rawSnippet?: string;
+}
+
+export class CnbsServiceError extends Error {
+  details: CnbsErrorDetails;
+
+  constructor(details: CnbsErrorDetails) {
+    super(details.message);
+    this.name = 'CnbsServiceError';
+    this.details = details;
+  }
 }
 
 // 错误监控接口
@@ -70,6 +88,11 @@ export class CnbsErrorHandler {
       return details;
     }
 
+    if (error instanceof CnbsServiceError) {
+      errorMonitor.trackError(error.details);
+      return error.details;
+    }
+
     if (error.isAxiosError) {
       if (error.code === 'ECONNABORTED') {
         const details: CnbsErrorDetails = {
@@ -77,6 +100,23 @@ export class CnbsErrorHandler {
           message: 'Request timed out',
           source: error,
           canRetry: true,
+          code: error.code,
+        };
+        errorMonitor.trackError(details);
+        return details;
+      }
+
+      if (error.code === 'ERR_FR_TOO_MANY_REDIRECTS') {
+        const details: CnbsErrorDetails = {
+          type: CnbsErrorType.ACCESS_BLOCKED,
+          message: 'Remote CNBS service entered a redirect loop, likely due to anti-bot or access control.',
+          source: error,
+          canRetry: false,
+          code: error.code,
+          hints: [
+            'The upstream site may be serving a WAF or anti-bot challenge instead of JSON data.',
+            'Verify whether this network path requires a browser session, proxy, or additional cookies.'
+          ],
         };
         errorMonitor.trackError(details);
         return details;
@@ -92,6 +132,8 @@ export class CnbsErrorHandler {
             message: 'Rate limit exceeded',
             source: error,
             canRetry: true,
+            code: error.code,
+            status,
             retryAfter: retryAfter ? parseInt(retryAfter, 10) * 1000 : undefined,
           };
           errorMonitor.trackError(details);
@@ -103,6 +145,8 @@ export class CnbsErrorHandler {
             message: `API error: ${status} ${error.response.statusText}`,
             source: error,
             canRetry: true,
+            code: error.code,
+            status,
           };
           errorMonitor.trackError(details);
           return details;
@@ -113,6 +157,8 @@ export class CnbsErrorHandler {
             message: `API error: ${status} ${error.response.statusText}`,
             source: error,
             canRetry: false,
+            code: error.code,
+            status,
           };
           errorMonitor.trackError(details);
           return details;
@@ -125,6 +171,7 @@ export class CnbsErrorHandler {
           message: 'Network error: No response received',
           source: error,
           canRetry: true,
+          code: error.code,
         };
         errorMonitor.trackError(details);
         return details;
@@ -135,6 +182,7 @@ export class CnbsErrorHandler {
         message: error.message || 'Unknown error',
         source: error,
         canRetry: false,
+        code: error.code,
       };
       errorMonitor.trackError(details);
       return details;
@@ -262,6 +310,19 @@ export class CnbsErrorHandler {
       console.error(`Safe execute failed: ${errorDetails.message}`);
       return fallback;
     }
+  }
+
+  static createServiceError(details: CnbsErrorDetails): CnbsServiceError {
+    return new CnbsServiceError(details);
+  }
+
+  static toToolErrorData(error: unknown, tool?: string): { message: string; details: CnbsErrorDetails } {
+    const details = this.analyze(error);
+    const mergedDetails = tool ? { ...details, tool } : details;
+    return {
+      message: mergedDetails.message,
+      details: mergedDetails,
+    };
   }
 }
 
