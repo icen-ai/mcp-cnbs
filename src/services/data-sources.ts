@@ -123,50 +123,49 @@ export class WorldBankDataSource implements DataSource {
       startYear,
       endYear,
     });
-    const cached = this.cache.fetch(cacheKey);
-    if (cached) return cached;
+    return this.cache.fetchOrLoad(
+      cacheKey,
+      () => cnbsRequestThrottler.execute(async () => {
+        return CnbsErrorHandler.retryWithBackoff(async () => {
+          const url = `https://api.worldbank.org/v2/country/${countries}/indicator/${indicatorId}`;
+          const response = await axios.get(url, {
+            ...axiosConfig,
+            params: {
+              format: 'json',
+              date: `${startYear}:${endYear}`,
+              per_page: 200,
+              ...(params.mrv ? { mrv: params.mrv } : {}),
+            },
+          });
 
-    return cnbsRequestThrottler.execute(async () => {
-      return CnbsErrorHandler.retryWithBackoff(async () => {
-        const url = `https://api.worldbank.org/v2/country/${countries}/indicator/${indicatorId}`;
-        const response = await axios.get(url, {
-          ...axiosConfig,
-          params: {
-            format: 'json',
-            date: `${startYear}:${endYear}`,
-            per_page: 200,
-            ...(params.mrv ? { mrv: params.mrv } : {}),
-          },
+          const [meta, dataPoints] = response.data as [any, any[]];
+          if (!dataPoints) throw new Error('World Bank API returned empty data');
+
+          return {
+            source: 'world_bank',
+            indicator: { id: indicatorId, name: resolved.name, unit: resolved.unit },
+            countries: countries.split(';'),
+            meta: {
+              total: meta?.total,
+              page: meta?.page,
+              lastUpdated: meta?.lastupdated,
+            },
+            data: dataPoints
+              .filter(d => d.value !== null)
+              .map(d => ({
+                country: d.country?.value,
+                countryCode: d.countryiso3code || d.country?.id,
+                period: d.date,
+                value: d.value,
+                unit: resolved.unit,
+              }))
+              .sort((a, b) => String(a.period).localeCompare(String(b.period))),
+          };
         });
-
-        const [meta, dataPoints] = response.data as [any, any[]];
-        if (!dataPoints) throw new Error('World Bank API returned empty data');
-
-        const result = {
-          source: 'world_bank',
-          indicator: { id: indicatorId, name: resolved.name, unit: resolved.unit },
-          countries: countries.split(';'),
-          meta: {
-            total: meta?.total,
-            page: meta?.page,
-            lastUpdated: meta?.lastupdated,
-          },
-          data: dataPoints
-            .filter(d => d.value !== null)
-            .map(d => ({
-              country: d.country?.value,
-              countryCode: d.countryiso3code || d.country?.id,
-              period: d.date,
-              value: d.value,
-              unit: resolved.unit,
-            }))
-            .sort((a, b) => String(a.period).localeCompare(String(b.period))),
-        };
-
-        this.cache.store(cacheKey, result);
-        return result;
-      });
-    });
+      }),
+      24 * 60 * 60 * 1000,
+      2 * 60 * 60 * 1000,
+    );
   }
 
   async getCategories(): Promise<any[]> {
@@ -256,43 +255,42 @@ export class IMFDataSource implements DataSource {
       indicator: indicatorId,
       countries: countries.join('_'),
     });
-    const cached = this.cache.fetch(cacheKey);
-    if (cached) return cached;
+    return this.cache.fetchOrLoad(
+      cacheKey,
+      () => cnbsRequestThrottler.execute(async () => {
+        return CnbsErrorHandler.retryWithBackoff(async () => {
+          const countryStr = countries.join(',');
+          const url = `https://www.imf.org/external/datamapper/api/v1/${indicatorId}/${countryStr}`;
+          const response = await axios.get(url, { ...axiosConfig, params: { periods: 30 } });
 
-    return cnbsRequestThrottler.execute(async () => {
-      return CnbsErrorHandler.retryWithBackoff(async () => {
-        const countryStr = countries.join(',');
-        const url = `https://www.imf.org/external/datamapper/api/v1/${indicatorId}/${countryStr}`;
-        const response = await axios.get(url, { ...axiosConfig, params: { periods: 30 } });
+          const rawValues = response.data?.values?.[indicatorId] || {};
+          const data: any[] = [];
 
-        const rawValues = response.data?.values?.[indicatorId] || {};
-        const data: any[] = [];
-
-        for (const country of countries) {
-          const countryData = rawValues[country] || {};
-          for (const [year, value] of Object.entries(countryData)) {
-            if (value !== null && value !== undefined) {
-              data.push({ country, period: year, value: Number(value), unit: resolved.unit });
+          for (const country of countries) {
+            const countryData = rawValues[country] || {};
+            for (const [year, value] of Object.entries(countryData)) {
+              if (value !== null && value !== undefined) {
+                data.push({ country, period: year, value: Number(value), unit: resolved.unit });
+              }
             }
           }
-        }
 
-        // 过滤指定年份
-        const filtered = params.periods
-          ? data.filter(d => params.periods!.includes(d.period))
-          : data;
+          // 过滤指定年份
+          const filtered = params.periods
+            ? data.filter(d => params.periods!.includes(d.period))
+            : data;
 
-        const result = {
-          source: 'imf',
-          indicator: { id: indicatorId, name: resolved.name, unit: resolved.unit },
-          countries,
-          data: filtered.sort((a, b) => `${a.country}${a.period}`.localeCompare(`${b.country}${b.period}`)),
-        };
-
-        this.cache.store(cacheKey, result);
-        return result;
-      });
-    });
+          return {
+            source: 'imf',
+            indicator: { id: indicatorId, name: resolved.name, unit: resolved.unit },
+            countries,
+            data: filtered.sort((a, b) => `${a.country}${a.period}`.localeCompare(`${b.country}${b.period}`)),
+          };
+        });
+      }),
+      24 * 60 * 60 * 1000,
+      4 * 60 * 60 * 1000,
+    );
   }
 
   async getCategories(): Promise<any[]> {
@@ -319,16 +317,17 @@ export class IMFDataSource implements DataSource {
   // 获取 IMF WEO 指标完整列表
   async listAllIndicators(): Promise<any> {
     const cacheKey = 'imf_indicators_list';
-    const cached = this.cache.fetch(cacheKey);
-    if (cached) return cached;
-
-    return cnbsRequestThrottler.execute(async () => {
-      return CnbsErrorHandler.retryWithBackoff(async () => {
-        const response = await axios.get('https://www.imf.org/external/datamapper/api/v1/indicators', axiosConfig);
-        this.cache.store(cacheKey, response.data, 7 * 24 * 60 * 60 * 1000);
-        return response.data;
-      });
-    });
+    return this.cache.fetchOrLoad(
+      cacheKey,
+      () => cnbsRequestThrottler.execute(async () => {
+        return CnbsErrorHandler.retryWithBackoff(async () => {
+          const response = await axios.get('https://www.imf.org/external/datamapper/api/v1/indicators', axiosConfig);
+          return response.data;
+        });
+      }),
+      7 * 24 * 60 * 60 * 1000,
+      12 * 60 * 60 * 1000,
+    );
   }
 }
 
@@ -405,32 +404,31 @@ export class OECDDataSource implements DataSource {
       startPeriod: params.startPeriod || '',
       lastN: params.lastNObservations || 20,
     });
-    const cached = this.cache.fetch(cacheKey);
-    if (cached) return cached;
+    return this.cache.fetchOrLoad(
+      cacheKey,
+      () => cnbsRequestThrottler.execute(async () => {
+        return CnbsErrorHandler.retryWithBackoff(async () => {
+          const url = `https://sdmx.oecd.org/public/rest/data/${agencyId},${dataflowId}/${key}`;
+          const queryParams: Record<string, any> = { format: 'jsondata' };
+          if (params.startPeriod) queryParams.startPeriod = params.startPeriod;
+          if (params.endPeriod) queryParams.endPeriod = params.endPeriod;
+          if (params.lastNObservations) queryParams.lastNObservations = params.lastNObservations;
 
-    return cnbsRequestThrottler.execute(async () => {
-      return CnbsErrorHandler.retryWithBackoff(async () => {
-        const url = `https://sdmx.oecd.org/public/rest/data/${agencyId},${dataflowId}/${key}`;
-        const queryParams: Record<string, any> = { format: 'jsondata' };
-        if (params.startPeriod) queryParams.startPeriod = params.startPeriod;
-        if (params.endPeriod) queryParams.endPeriod = params.endPeriod;
-        if (params.lastNObservations) queryParams.lastNObservations = params.lastNObservations;
+          const response = await axios.get(url, { ...axiosConfig, params: queryParams });
+          const parsed = parseSdmxJson(response.data);
 
-        const response = await axios.get(url, { ...axiosConfig, params: queryParams });
-        const parsed = parseSdmxJson(response.data);
-
-        const result = {
-          source: 'oecd',
-          dataset: { agencyId, dataflowId, name: preset?.name || dataflowId },
-          key,
-          count: parsed.length,
-          data: parsed,
-        };
-
-        this.cache.store(cacheKey, result);
-        return result;
-      });
-    });
+          return {
+            source: 'oecd',
+            dataset: { agencyId, dataflowId, name: preset?.name || dataflowId },
+            key,
+            count: parsed.length,
+            data: parsed,
+          };
+        });
+      }),
+      24 * 60 * 60 * 1000,
+      2 * 60 * 60 * 1000,
+    );
   }
 
   async getCategories(): Promise<any[]> {
@@ -543,34 +541,33 @@ export class BISDataSource implements DataSource {
       key,
       lastN,
     });
-    const cached = this.cache.fetch(cacheKey);
-    if (cached) return cached;
+    return this.cache.fetchOrLoad(
+      cacheKey,
+      () => cnbsRequestThrottler.execute(async () => {
+        return CnbsErrorHandler.retryWithBackoff(async () => {
+          const url = `https://stats.bis.org/api/v1/data/${preset.dataflow}/${key}`;
+          const queryParams: Record<string, any> = {
+            format: 'jsondata',
+            lastNObservations: lastN,
+          };
+          if (params.startPeriod) queryParams.startPeriod = params.startPeriod;
 
-    return cnbsRequestThrottler.execute(async () => {
-      return CnbsErrorHandler.retryWithBackoff(async () => {
-        const url = `https://stats.bis.org/api/v1/data/${preset.dataflow}/${key}`;
-        const queryParams: Record<string, any> = {
-          format: 'jsondata',
-          lastNObservations: lastN,
-        };
-        if (params.startPeriod) queryParams.startPeriod = params.startPeriod;
+          const response = await axios.get(url, { ...axiosConfig, params: queryParams });
+          const parsed = parseSdmxJson(response.data);
 
-        const response = await axios.get(url, { ...axiosConfig, params: queryParams });
-        const parsed = parseSdmxJson(response.data);
-
-        const result = {
-          source: 'bis',
-          dataset: { dataflow: preset.dataflow, name: preset.name, description: preset.description },
-          country,
-          key,
-          count: parsed.length,
-          data: parsed,
-        };
-
-        this.cache.store(cacheKey, result);
-        return result;
-      });
-    });
+          return {
+            source: 'bis',
+            dataset: { dataflow: preset.dataflow, name: preset.name, description: preset.description },
+            country,
+            key,
+            count: parsed.length,
+            data: parsed,
+          };
+        });
+      }),
+      12 * 60 * 60 * 1000,
+      60 * 60 * 1000,
+    );
   }
 
   async getCategories(): Promise<any[]> {
@@ -671,45 +668,44 @@ export class FREDDataSource implements DataSource {
       start: params.observationStart || '',
       end: params.observationEnd || '',
     });
-    const cached = this.cache.fetch(cacheKey);
-    if (cached) return cached;
+    return this.cache.fetchOrLoad(
+      cacheKey,
+      () => cnbsRequestThrottler.execute(async () => {
+        return CnbsErrorHandler.retryWithBackoff(async () => {
+          const response = await axios.get(
+            'https://api.stlouisfed.org/fred/series/observations',
+            {
+              ...axiosConfig,
+              params: {
+                series_id: seriesId,
+                api_key: apiKey,
+                file_type: 'json',
+                limit: params.limit || 100,
+                sort_order: params.sortOrder || 'desc',
+                ...(params.observationStart ? { observation_start: params.observationStart } : {}),
+                ...(params.observationEnd ? { observation_end: params.observationEnd } : {}),
+              },
+            }
+          );
 
-    return cnbsRequestThrottler.execute(async () => {
-      return CnbsErrorHandler.retryWithBackoff(async () => {
-        const response = await axios.get(
-          'https://api.stlouisfed.org/fred/series/observations',
-          {
-            ...axiosConfig,
-            params: {
-              series_id: seriesId,
-              api_key: apiKey,
-              file_type: 'json',
-              limit: params.limit || 100,
-              sort_order: params.sortOrder || 'desc',
-              ...(params.observationStart ? { observation_start: params.observationStart } : {}),
-              ...(params.observationEnd ? { observation_end: params.observationEnd } : {}),
-            },
-          }
-        );
-
-        const obs = response.data?.observations || [];
-        const result = {
-          source: 'fred',
-          series: { id: seriesId, name: preset?.name || seriesId, unit: preset?.unit || '', freq: preset?.freq || '' },
-          count: obs.length,
-          data: obs
-            .filter((o: any) => o.value !== '.' && o.value !== null)
-            .map((o: any) => ({
-              period: o.date,
-              value: Number(o.value),
-              unit: preset?.unit || '',
-            })),
-        };
-
-        this.cache.store(cacheKey, result);
-        return result;
-      });
-    });
+          const obs = response.data?.observations || [];
+          return {
+            source: 'fred',
+            series: { id: seriesId, name: preset?.name || seriesId, unit: preset?.unit || '', freq: preset?.freq || '' },
+            count: obs.length,
+            data: obs
+              .filter((o: any) => o.value !== '.' && o.value !== null)
+              .map((o: any) => ({
+                period: o.date,
+                value: Number(o.value),
+                unit: preset?.unit || '',
+              })),
+          };
+        });
+      }),
+      60 * 60 * 1000,
+      15 * 60 * 1000,
+    );
   }
 
   async getCategories(): Promise<any[]> {
@@ -779,29 +775,28 @@ export class CensusDataSource implements DataSource {
       type: censusType,
       keyword: searchKeyword,
     });
-    const cached = this.cache.fetch(cacheKey);
-    if (cached) return cached;
+    return this.cache.fetchOrLoad(
+      cacheKey,
+      () => cnbsRequestThrottler.execute(async () => {
+        return CnbsErrorHandler.retryWithBackoff(async () => {
+          const searchResult = await this.nbsClient.findItems({
+            keyword: searchKeyword,
+            pageSize: params.pageSize || 20,
+          });
 
-    return cnbsRequestThrottler.execute(async () => {
-      return CnbsErrorHandler.retryWithBackoff(async () => {
-        const searchResult = await this.nbsClient.findItems({
-          keyword: searchKeyword,
-          pageSize: params.pageSize || 20,
+          return {
+            source: 'census_nbs',
+            censusType,
+            name: preset?.name || censusType,
+            latestYear: preset?.latestYear,
+            searchKeyword,
+            data: searchResult,
+          };
         });
-
-        const result = {
-          source: 'census_nbs',
-          censusType,
-          name: preset?.name || censusType,
-          latestYear: preset?.latestYear,
-          searchKeyword,
-          data: searchResult,
-        };
-
-        this.cache.store(cacheKey, result);
-        return result;
-      });
-    });
+      }),
+      7 * 24 * 60 * 60 * 1000,
+      24 * 60 * 60 * 1000,
+    );
   }
 
   async getCategories(): Promise<any[]> {
@@ -904,29 +899,28 @@ export class DepartmentDataSource implements DataSource {
       department: params.department,
       keyword,
     });
-    const cached = this.cache.fetch(cacheKey);
-    if (cached) return cached;
+    return this.cache.fetchOrLoad(
+      cacheKey,
+      () => cnbsRequestThrottler.execute(async () => {
+        return CnbsErrorHandler.retryWithBackoff(async () => {
+          const result = await this.nbsClient.findItems({
+            keyword,
+            pageSize: params.pageSize || 20,
+          });
 
-    return cnbsRequestThrottler.execute(async () => {
-      return CnbsErrorHandler.retryWithBackoff(async () => {
-        const result = await this.nbsClient.findItems({
-          keyword,
-          pageSize: params.pageSize || 20,
+          return {
+            source: 'department_nbs',
+            department: params.department,
+            name: preset.name,
+            ministry: preset.ministry,
+            keyword,
+            data: result,
+          };
         });
-
-        const output = {
-          source: 'department_nbs',
-          department: params.department,
-          name: preset.name,
-          ministry: preset.ministry,
-          keyword,
-          data: result,
-        };
-
-        this.cache.store(cacheKey, output);
-        return output;
-      });
-    });
+      }),
+      4 * 60 * 60 * 1000,
+      30 * 60 * 1000,
+    );
   }
 
   async getCategories(): Promise<any[]> {
@@ -984,10 +978,10 @@ export class InternationalDataSource implements DataSource {
   }): Promise<any> {
     const src = params.source || 'world_bank';
     switch (src) {
-      case 'world_bank': return this.worldBank.fetchData(params);
-      case 'imf':        return this.imf.fetchData(params);
-      case 'oecd':       return this.oecd.fetchData(params);
-      case 'bis':        return this.bis.fetchData(params);
+      case 'world_bank': return this.worldBank.fetchData(params as any);
+      case 'imf':        return this.imf.fetchData(params as any);
+      case 'oecd':       return this.oecd.fetchData(params as any);
+      case 'bis':        return this.bis.fetchData(params as any);
       default:
         throw new Error(`未知国际数据来源 "${src}"。可选: world_bank, imf, oecd, bis`);
     }

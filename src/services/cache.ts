@@ -19,6 +19,7 @@ interface CnbsCacheOptions {
   defaultExpire?: number;
   maxMemorySize?: number;
   cleanupInterval?: number;
+  persistPath?: string;
 }
 
 interface CnbsCacheStats {
@@ -55,6 +56,7 @@ export class CnbsLruCache<T> {
   private totalMisses: number = 0;
   private evictionCount: number = 0;
   private expirationCount: number = 0;
+  private inflightMap = new Map<string, Promise<T>>();
 
   constructor(options: CnbsCacheOptions = {}) {
     this.capacity = options.capacity ?? 1000;
@@ -163,6 +165,75 @@ export class CnbsLruCache<T> {
       if (value !== null) result.set(key, value);
     }
     return result;
+  }
+
+  /**
+   * Fetch from cache or invoke loader — with two guarantees:
+   *  1. In-flight dedup: concurrent requests for the same missing key share one Promise.
+   *  2. Stale-while-revalidate: if entry expired within `staleGrace` ms, serve the
+   *     stale value immediately and kick off a background refresh.
+   */
+  async fetchOrLoad(
+    key: string,
+    loader: () => Promise<T>,
+    ttl?: number,
+    staleGrace: number = 0,
+  ): Promise<T> {
+    this.maybeCleanup();
+    const now = Date.now();
+    const entry = this.entryMap.get(key);
+
+    if (entry) {
+      if (now <= entry.expireAt) {
+        // Fresh hit
+        entry.hitCount++;
+        entry.lastHit = now;
+        this.promoteEntry(entry);
+        this.totalHits++;
+        return entry.value;
+      }
+
+      if (staleGrace > 0 && now <= entry.expireAt + staleGrace) {
+        // Stale-while-revalidate: return stale value, refresh in background
+        entry.hitCount++;
+        entry.lastHit = now;
+        this.totalHits++;
+        if (!this.inflightMap.has(key)) {
+          const bg = loader()
+            .then(v => { this.store(key, v, ttl); })
+            .catch(() => { /* background refresh failure is silent */ })
+            .finally(() => { this.inflightMap.delete(key); });
+          this.inflightMap.set(key, bg as unknown as Promise<T>);
+        }
+        return entry.value;
+      }
+
+      // Fully expired
+      this.removeEntryFromList(entry);
+      this.entryMap.delete(key);
+      this.expirationCount++;
+      this.totalMisses++;
+    } else {
+      this.totalMisses++;
+    }
+
+    // In-flight dedup: if another coroutine is already fetching this key, wait for it
+    const inflight = this.inflightMap.get(key);
+    if (inflight) return inflight;
+
+    const promise = loader()
+      .then(value => {
+        this.store(key, value, ttl);
+        this.inflightMap.delete(key);
+        return value;
+      })
+      .catch(err => {
+        this.inflightMap.delete(key);
+        throw err;
+      });
+
+    this.inflightMap.set(key, promise);
+    return promise;
   }
 
   store(key: string, value: T, ttl: number = this.defaultExpire): void {

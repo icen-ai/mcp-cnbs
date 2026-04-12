@@ -7,15 +7,15 @@
 | 数据源 | 认证 | 覆盖范围 |
 |--------|------|---------|
 | **国家统计局 (NBS)** (data.stats.gov.cn) | 无需 | 国内月度/季度/年度/分省全量数据 |
-| **世界银行** (api.worldbank.org) | 无需 | 200+ 国家，GDP/贸易/人口/FDI/基尼系数等 18 个指标 |
-| **IMF DataMapper** | 无需 | WEO 预测：GDP增速/通胀/政府债务/经常账户等 14 个指标 |
+| **世界银行** (api.worldbank.org) | 无需 | 200+ 国家，GDP/贸易/人口/FDI/基尼系数等 |
+| **IMF DataMapper** | 无需 | WEO 预测：GDP增速/通胀/政府债务/经常账户等 |
 | **OECD SDMX** | 无需 | 成员国季度GDP/就业/综合先行指标/贸易 |
-| **BIS Statistics** | 无需 | 有效汇率/信贷缺口/住宅房价/债务偿还比率/跨境银行统计 |
+| **BIS Statistics** | 无需 | 有效汇率/信贷缺口/住宅房价/跨境银行统计 |
 | **FRED（美联储）** | `X-Fred-Api-Key` 请求头 | 美国利率/人民币汇率/原油/黄金/标普500/M2 |
 | **NBS 普查数据** | 无需 | 人口普查（2020）/经济普查（2018）/农业普查（2016） |
 | **NBS 部门统计** | 无需 | 财政/工业/商务/农业/货币金融/社保/房地产/能源 |
 
-> **FRED API Key：** 在 https://fred.stlouisfed.org/docs/api/api_key.html 免费申请，然后在 MCP 客户端配置中通过 `X-Fred-Api-Key` 请求头传入（见下方配置示例）。stdio 模式下也支持 `FRED_API_KEY` 环境变量作为兜底。
+> **FRED API Key：** 在 https://fred.stlouisfed.org/docs/api/api_key.html 免费申请，通过 `X-Fred-Api-Key` 请求头传入（HTTP 模式），或设置 `FRED_API_KEY` 环境变量（stdio 模式）。
 
 ---
 
@@ -44,7 +44,7 @@ mcp-cnbs
 
 ## MCP 客户端配置
 
-### NPX 模式（本地运行）
+### stdio 模式（npx）
 
 **支持的客户端：** Claude Desktop、Cursor、Windsurf、Cherry Studio、Trae、Continue 等所有支持 MCP 的客户端。
 
@@ -59,7 +59,7 @@ mcp-cnbs
 }
 ```
 
-带 FRED 支持（stdio 模式 — 环境变量兜底）：
+带 FRED 支持：
 
 ```json
 {
@@ -90,9 +90,6 @@ mcp-cnbs
 }
 ```
 
-> 这是阿里云 ModelScope 提供的免费公共演示，无需认证，但不含 FRED 功能。
-> 建议正式使用时自行部署：[在魔搭免费部署](https://modelscope.cn/mcp/servers/thatcoder/cnbs)
-
 **HTTP 模式含 FRED 支持** — 在请求头中携带 API Key：
 ```json
 {
@@ -106,6 +103,9 @@ mcp-cnbs
   }
 }
 ```
+
+> 这是阿里云 ModelScope 提供的免费公共演示，无需认证。  
+> 正式使用建议自行部署：[在魔搭免费部署](https://modelscope.cn/mcp/servers/thatcoder/cnbs)
 
 ---
 
@@ -129,22 +129,21 @@ mcp-cnbs
 |------|------|
 | `cnbs_search` | 关键词搜索，返回最新数据值 — **优先使用** |
 | `cnbs_batch_search` | 批量搜索多个关键词 |
-| `cnbs_fetch_nodes` | 获取分类树节点 |
-| `cnbs_fetch_metrics` | 获取数据集指标列表 |
-| `cnbs_fetch_series` | 获取历史时间序列（value 可能为空，最新值用 `cnbs_search`） |
-| `cnbs_fetch_end_nodes` | 递归获取所有叶子节点 |
+| `cnbs_economic_snapshot` | 一次获取 10 项核心宏观指标最新值（GDP、CPI、PPI、PMI、失业率、工业增加值、社零、固投、进出口、M2） |
 | `cnbs_compare` | 地区对比 / 时间对比 |
+| `cnbs_fetch_nodes` | 获取分类树节点 — 支持同时传入多个分类代码 |
+| `cnbs_fetch_metrics` | 获取数据集指标列表 — 支持同时传入多个 setId |
+| `cnbs_fetch_series` | 获取历史时间序列 |
+| `cnbs_fetch_end_nodes` | 递归获取所有叶子节点 |
 
-### NBS 辅助与同步
+### NBS 辅助
 
 | 工具 | 功能 |
 |------|------|
-| `cnbs_get_regions` | 获取地区代码和名称 |
+| `cnbs_get_guide` | 获取完整工具指南（适合 LLM 自我定向） |
+| `cnbs_get_regions` | 获取地区代码和名称（GB/T 2260） |
 | `cnbs_get_categories` | 获取所有 NBS 分类代码 |
-| `cnbs_sync_data` | 同步 NBS 分类数据 |
-| `cnbs_get_sync_status` | 获取同步状态 |
-| `cnbs_check_data_freshness` | 检查数据集新鲜度 |
-| `cnbs_list_data_sources` | 列出所有可用数据源 |
+| `cnbs_list_data_sources` | 列出所有可用数据源及工具映射 |
 | `cnbs_fetch_data_from_source` | 从指定数据源获取数据 |
 | `cnbs_get_source_categories` | 获取数据源分类信息 |
 | `cnbs_search_in_source` | 在指定数据源中搜索 |
@@ -161,7 +160,7 @@ mcp-cnbs
 
 | 工具 | 功能 |
 |------|------|
-| `ext_imf` | 查询 IMF WEO 指标，按国家和年份 |
+| `ext_imf` | 查询 IMF WEO 数据 — 支持同时传入多个指标 |
 | `ext_imf_indicators` | 列出预置 IMF 指标 |
 | `ext_imf_all_indicators` | 获取 IMF DataMapper 完整指标目录 |
 
@@ -176,14 +175,14 @@ mcp-cnbs
 
 | 工具 | 功能 |
 |------|------|
-| `ext_bis` | 查询 BIS 统计（汇率/信贷缺口/房价/跨境银行） |
+| `ext_bis` | 查询 BIS 统计 — 支持同时传入多个国家 |
 | `ext_bis_datasets` | 列出 BIS 数据集及键模板 |
 
 ### FRED（美联储）
 
 | 工具 | 功能 |
 |------|------|
-| `ext_fred` | 查询 FRED 系列（利率/汇率/大宗商品/美国宏观） |
+| `ext_fred` | 查询 FRED 系列 — 支持同时传入多个系列 |
 | `ext_fred_series` | 列出所有预置 FRED 系列 |
 
 ### 国内扩展数据源
@@ -192,68 +191,26 @@ mcp-cnbs
 |------|------|
 | `ext_cn_census` | 查询 NBS 普查数据（人口/经济/农业普查） |
 | `ext_cn_department` | 按部门查询 NBS 统计指标 |
-| `ext_cn_department_list` | 列出所有部门及指标关键词 |
+| `ext_cn_department_list` | 列出所有部门分类及指标关键词 |
 
 ### 跨源对比
 
 | 工具 | 功能 |
 |------|------|
-| `ext_global_compare` | 同时从世界银行和 IMF 获取同一指标，快速多国对比 |
-
-### 数据分析
-
-| 工具 | 功能 |
-|------|------|
-| `cnbs_analyze_trend` | 趋势方向、变化量、斜率 |
-| `cnbs_analyze_correlation` | 两组数据的皮尔逊相关系数 |
-| `cnbs_detect_anomalies` | 异常值检测（标准差阈值法） |
-| `cnbs_analyze_statistics` | 均值、中位数、标准差、极值 |
-| `cnbs_analyze_time_series` | 趋势 + 季节性分解 |
-| `cnbs_predict_data` | 线性外推预测未来值 |
-| `cnbs_assess_data_quality` | 完整性、准确性、一致性评估 |
-| `cnbs_generate_summary` | 数据数组摘要 |
-
-### 数据转换
-
-| 工具 | 功能 |
-|------|------|
-| `cnbs_normalize_data` | Min-Max 归一化到 [0, 1] |
-| `cnbs_standardize_data` | Z-score 标准化 |
-| `cnbs_moving_average` | 简单移动平均 |
-| `cnbs_exponential_smoothing` | 指数平滑 |
-
-### 可视化
-
-| 工具 | 功能 |
-|------|------|
-| `cnbs_generate_chart` | 生成 ECharts / Chart.js / D3.js 图表配置 |
-
-支持图表类型：`line`（折线）`bar`（柱状）`pie`（饼图）`scatter`（散点）`radar`（雷达）`heatmap`（热力图）`treemap`（树图）`gauge`（仪表盘）
-
-### 格式化与工具
-
-| 工具 | 功能 |
-|------|------|
-| `cnbs_get_guide` | 获取完整工具指南 |
-| `cnbs_get_cache_stats` | 缓存命中统计 |
-| `cnbs_format_number` | 数字格式化 |
-| `cnbs_enhanced_format_number` | 增强格式化（固定小数/紧凑/百分比） |
-| `cnbs_transform_unit` | 单位转换 |
-| `cnbs_compute_stats` | 数组基本统计 |
-| `cnbs_validate_data` | 数据清洗/验证 |
+| `ext_global_compare` | 同时从世界银行和 IMF 获取同一指标，快速多国横向对比 |
 
 ---
 
 ## 快速示例
 
-### 国内数据查询
+### 中国宏观经济速览
 
 ```
-// 最新 GDP 值
-cnbs_search(keyword="GDP")
+// 一次获取所有核心宏观指标
+cnbs_economic_snapshot()
 
-// 最新 CPI
-cnbs_search(keyword="CPI")
+// 单个指标最新值
+cnbs_search(keyword="GDP")
 
 // 批量查询
 cnbs_batch_search(keywords=["GDP", "CPI", "出生率", "城镇化率"])
@@ -261,107 +218,63 @@ cnbs_batch_search(keywords=["GDP", "CPI", "出生率", "城镇化率"])
 // 地区对比
 cnbs_compare(keyword="GDP", regions=["北京", "上海", "广东"], compareType="region")
 
-// 历史时间序列（先搜索获取 cid/indic_id，再查 series）
+// 历史时间序列（先搜索获取 cid/indic_id）
 cnbs_search(keyword="GDP")
 cnbs_fetch_series(setId="...", metricIds=["..."], periods=["2015YY-2024YY"])
 ```
 
-### 世界银行
+### 国际数据
 
 ```
-// 中国 GDP 增速（2010年至今）
-ext_world_bank(indicator="GDP_GROWTH", countries=["CHN"], startYear=2010)
+// G7+中国 GDP 增速对比
+ext_world_bank(indicator="GDP_GROWTH", countries=["CHN","USA","DEU","JPN","GBR","FRA","ITA","CAN"], startYear=2015)
 
-// G7+中国 人均 GDP 对比
-ext_world_bank(indicator="GDP_PER_CAPITA", countries=["CHN","USA","DEU","JPN","GBR","FRA","ITA","CAN"], startYear=2015)
-
-// 中国多指标批量
+// 中国多指标批量查询
 ext_world_bank_multi(indicators=["GDP_GROWTH","CPI","UNEMPLOYMENT","FDI_INFLOWS"], countries=["CHN"], startYear=2010)
 
-// 查看贸易相关指标
-ext_world_bank_indicators(keyword="trade")
+// IMF 单指标
+ext_imf(indicators="GDP_GROWTH", countries=["CHN","USA","JPN","DEU"], periods=["2022","2023","2024","2025"])
+
+// IMF 多指标一次查询
+ext_imf(indicators=["GDP_GROWTH","CPI_INFLATION","GOVT_DEBT"], countries=["CHN","USA"], periods=["2020","2021","2022","2023","2024"])
+
+// 世界银行 + IMF 双源交叉验证
+ext_global_compare(wbIndicator="GDP_GROWTH", imfIndicator="GDP_GROWTH", countries=["CHN","USA","DEU","JPN","IND"], startYear=2015)
 ```
 
-### IMF
+### BIS & FRED
 
 ```
-// GDP 增速预测（含 2024/2025 年展望）
-ext_imf(indicator="GDP_GROWTH", countries=["CHN","USA","JPN","DEU"], periods=["2022","2023","2024","2025"])
+// BIS 单国
+ext_bis(dataset="EER", countries="CN", lastNObservations=36)
 
-// 政府债务/GDP 对比
-ext_imf(indicator="GOVT_DEBT", countries=["CHN","USA","JPN","DEU","ITA","GBR"])
-
-// 查看所有 IMF 指标
-ext_imf_all_indicators()
-```
-
-### BIS
-
-```
-// 中国实际有效汇率（近 3 年）
-ext_bis(dataset="EER", country="CN", lastNObservations=36)
+// BIS 多国一次查询
+ext_bis(dataset="EER", countries=["CN","US","DE","JP"], lastNObservations=24)
 
 // 信贷缺口（系统性金融风险早期预警）
-ext_bis(dataset="CREDIT_GAP", country="CN", lastNObservations=20)
+ext_bis(dataset="CREDIT_GAP", countries=["CN","US"], lastNObservations=20)
 
-// 住宅房价指数
-ext_bis(dataset="PROPERTY_PRICES", country="CN", lastNObservations=20)
-
-// 跨境银行统计（外部敞口）
-ext_bis(dataset="CROSS_BORDER_BANKING", country="CN", lastNObservations=16)
-```
-
-### FRED（需在请求头携带 X-Fred-Api-Key）
-
-```
-// WTI 原油价格（最近 100 天）
+// FRED 单系列
 ext_fred(series="OIL_PRICE_WTI", limit=100, sortOrder="desc")
+
+// FRED 多系列一次查询
+ext_fred(series=["FED_FUNDS","CNY_USD","OIL_PRICE_WTI","GOLD_PRICE"], limit=30, sortOrder="desc")
 
 // 人民币兑美元汇率（2020年至今）
 ext_fred(series="CNY_USD", observationStart="2020-01-01")
-
-// 美联储基准利率历史
-ext_fred(series="FED_FUNDS", limit=60)
-
-// 黄金价格
-ext_fred(series="GOLD_PRICE", limit=60, sortOrder="desc")
-
-// 美元指数
-ext_fred(series="DOLLAR_INDEX", limit=60, sortOrder="desc")
-
-// VIX 恐慌指数
-ext_fred(series="VIX", limit=30, sortOrder="desc")
-```
-
-### 跨源联合对比
-
-```
-// 世界银行 + IMF 双源 GDP 增速对比（数据交叉验证）
-ext_global_compare(
-  wbIndicator="GDP_GROWTH",
-  imfIndicator="GDP_GROWTH",
-  countries=["CHN","USA","DEU","JPN","IND"],
-  startYear=2015
-)
 ```
 
 ### NBS 普查与部门
 
 ```
-// 第七次全国人口普查数据
+// 第七次全国人口普查
 ext_cn_census(type="population")
 
-// 经济普查
-ext_cn_census(type="economic")
-
-// 央行货币金融数据（M2、社会融资规模等）
+// 央行货币金融数据
 ext_cn_department(department="monetary", indicator="M2货币供应量")
 
-// 财政收支数据
+// 财政收支
 ext_cn_department(department="finance", indicator="财政收入")
-
-// 获取财政部所有指标
-ext_cn_department(department="finance", fetchAll=true)
 
 // 查看所有部门分类
 ext_cn_department_list()
@@ -401,26 +314,15 @@ ext_cn_department_list()
 
 ---
 
-## 注意事项
-
-1. **NBS 数据**：`cnbs_search` 的 `value` 字段有值；`cnbs_fetch_series` 的 `value` 可能为空（API 限制），最新值请用 `cnbs_search`
-2. **FRED**：需在 MCP 客户端配置中设置 `X-Fred-Api-Key` 请求头（免费申请）；stdio 模式可用 `FRED_API_KEY` 环境变量作为兜底，否则调用报错
-3. **BIS / OECD**：返回 SDMX-JSON 格式，解析后为 `{period, value, dimensions}` 数组
-4. **全部数据源**均有本地 LRU 缓存，重复查询自动命中缓存，TTL 由各源独立配置
-
----
-
 ## 鉴权配置
 
 默认无需鉴权。可通过 Bearer Token 启用：
 
-### 本地 / HTTP 模式
+### stdio / HTTP 模式
 
 ```bash
-# 命令行参数
 npx mcp-cnbs --port 12345 --auth-token your-secret-token
-
-# 环境变量
+# 或环境变量
 MCP_CNBS_AUTH_TOKEN=your-secret-token npx mcp-cnbs --port 12345
 ```
 
@@ -435,41 +337,14 @@ Authorization: Bearer your-secret-token
 npx wrangler secret put MCP_CNBS_AUTH_TOKEN
 ```
 
-### 带鉴权的 MCP 客户端配置
-
-```json
-{
-  "mcpServers": {
-    "cnbs": {
-      "command": "npx",
-      "args": ["mcp-cnbs", "--auth-token", "your-secret-token"],
-      "env": {
-        "FRED_API_KEY": "your_fred_api_key"
-      },
-      "headers": {
-        "X-Fred-Api-Key": "your_fred_api_key"
-      }
-    }
-  }
-}
-```
-
 ---
 
 ## 开发
 
 ```bash
-# 安装依赖
 npm install
-
-# 编译
 npm run build
-
-# 运行
 npm run start
-
-# 开发模式（监听文件变化）
-npm run dev
 ```
 
 ## 环境要求

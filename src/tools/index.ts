@@ -1,8 +1,7 @@
-﻿import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { CnbsModernClient } from '../services/api.js';
 import { CnbsCategory } from '../types/index.js';
-import { CnbsDataHelper, DataQualityAssessor } from '../services/data.js';
-import { CNBS_REGIONS, CNBS_CATEGORY_INFO, searchRegions, getRegionByCode, getRegionByName } from '../constants/index.js';
+import { CNBS_REGIONS, CNBS_CATEGORY_INFO, searchRegions, getRegionByName } from '../constants/index.js';
 import {
   dataSourceManager,
   worldBankSource,
@@ -21,7 +20,6 @@ import {
   DepartmentDataSource,
 } from '../services/data-sources.js';
 import type { CnbsServerConfig } from '../server.js';
-import { dataVisualizationService, dataAnalysisService, dataTransformationService, ChartType } from '../services/visualization.js';
 import { CnbsErrorHandler } from '../services/error.js';
 import { z } from 'zod';
 
@@ -173,13 +171,11 @@ cnbs_fetch_metrics(setId)                      // 指标列表
 cnbs_fetch_series(setId, metricIds, periods)   // 时间序列
 cnbs_fetch_end_nodes(category)                 // 递归叶子节点
 cnbs_compare(keyword, regions/years)           // 横向对比
+cnbs_economic_snapshot()                       // 中国宏观经济一览（10项核心指标）
 
 ### NBS 辅助
 cnbs_get_regions(keyword)          // 地区代码
 cnbs_get_categories()              // 分类代码
-cnbs_sync_data(categories)         // 数据同步
-cnbs_get_sync_status()             // 同步状态
-cnbs_check_data_freshness(setId)   // 数据新鲜度
 cnbs_list_data_sources()           // 所有数据源列表
 
 ### 国际数据
@@ -202,32 +198,7 @@ ext_cn_census(type, keyword, pageSize)
 ext_cn_department(department, indicator, pageSize, fetchAll)
 ext_cn_department_list()
 
-### 数据分析
-cnbs_analyze_trend(values)
-cnbs_analyze_correlation(data1, data2)
-cnbs_detect_anomalies(values, threshold)
-cnbs_analyze_statistics(values)
-cnbs_analyze_time_series(values, period)
-cnbs_predict_data(values, futureSteps)
-cnbs_assess_data_quality(data)
-cnbs_generate_summary(data)
-
-### 数据转换
-cnbs_normalize_data(values)
-cnbs_standardize_data(values)
-cnbs_moving_average(values, window)
-cnbs_exponential_smoothing(values, alpha)
-
-### 可视化
-cnbs_generate_chart(type, data, options)   // 生成 ECharts/Chart.js 配置
-
 ### 格式化/工具
-cnbs_format_number(value, precision)
-cnbs_enhanced_format_number(value, precision, format)
-cnbs_transform_unit(value, sourceUnit, targetUnit)
-cnbs_compute_stats(values)
-cnbs_validate_data(value)
-cnbs_get_cache_stats()
 cnbs_get_guide()
 
 ---
@@ -338,7 +309,7 @@ export function registerCnbsTools(server: McpServer, config?: CnbsServerConfig) 
     {
       title: 'Search CNBS Data',
       description: `通过关键词搜索中国国家统计局指标和数据（推荐优先使用）。返回匹配的数据集列表，包含 setId、名称、时间范围等信息。
-      
+
 Args:
   - keyword (string): 搜索关键词，如 "GDP"、"CPI"、"人口"
   - pageNum (number): 页码，默认1
@@ -394,17 +365,17 @@ Returns:
     'cnbs_fetch_nodes',
     {
       title: 'Fetch CNBS Nodes',
-      description: `获取中国国家统计局分类树节点。category=1月度/2季度/3年度/5分省季度/6分省年度/7其他。isEnd=true 的节点 id 即为 setId。
-      
+      description: `获取中国国家统计局分类树节点。支持同时查询多个分类。isEnd=true 的节点 id 即为 setId。
+
 Args:
-  - category (string): 分类代码：1月度 2季度 3年度 5分省季度 6分省年度 7其他
-  - parentId (string): 父节点ID，空或省略表示从根节点开始
+  - categories (string | string[]): 单个或多个分类代码，如 "3" 或 ["1","2","3"]（1月度 2季度 3年度 5分省季度 6分省年度 7其他）
+  - parentId (string): 父节点ID，空或省略表示从根节点开始（单分类时有效）
 
 Returns:
-  分类树节点列表
+  分类树节点列表，多个分类时返回按分类代码分组的结果
 `,
       inputSchema: z.object({
-        category: z.string().describe('分类代码：1月度 2季度 3年度 5分省季度 6分省年度 7其他'),
+        categories: z.union([z.string(), z.array(z.string())]).describe('单个或多个分类代码，如 "3" 或 ["1","2","3"]'),
         parentId: z.string().optional().describe('父节点ID，空或省略表示从根节点开始'),
       }).strict(),
       annotations: {
@@ -416,18 +387,19 @@ Returns:
     },
     async (args) => {
       try {
-        const nodes = await cnbsModernClient.fetchNodes({
-          category: args.category,
-          parentId: args.parentId,
+        const catList = Array.isArray(args.categories) ? args.categories : [args.categories];
+        if (catList.length === 1) {
+          const nodes = await cnbsModernClient.fetchNodes({ category: catList[0], parentId: args.parentId });
+          return { content: [{ type: 'text', text: JSON.stringify(nodes, null, 2) }], structuredContent: { nodes } };
+        }
+        const settled = await Promise.allSettled(catList.map((cat) => cnbsModernClient.fetchNodes({ category: cat, parentId: args.parentId })));
+        const combined: Record<string, any> = {};
+        settled.forEach((r, i) => {
+          combined[catList[i]] = r.status === 'fulfilled' ? r.value : { error: (r as PromiseRejectedResult).reason?.message };
         });
-        return {
-          content: [{ type: 'text', text: JSON.stringify(nodes, null, 2) }],
-          structuredContent: { nodes },
-        };
+        return { content: [{ type: 'text', text: JSON.stringify(combined, null, 2) }], structuredContent: combined };
       } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
+        return { content: [{ type: 'text', text: `Error: ${(error as Error).message}` }] };
       }
     }
   );
@@ -436,17 +408,17 @@ Returns:
     'cnbs_fetch_metrics',
     {
       title: 'Fetch CNBS Metrics',
-      description: `根据数据集ID (setId) 获取所有可用指标列表，包含指标名称、ID、单位等。
-      
+      description: `根据数据集ID (setId) 获取所有可用指标列表。支持同时查询多个数据集。
+
 Args:
-  - setId (string): 数据集ID，来自 cnbs_search 或 cnbs_fetch_nodes 的 isEnd=true 节点
-  - name (string): 指标名称过滤（可选）
+  - setIds (string | string[]): 单个或多个数据集ID，来自 cnbs_search 或 cnbs_fetch_nodes 的 isEnd=true 节点
+  - name (string): 指标名称过滤（可选，单个 setId 时有效）
 
 Returns:
-  指标列表
+  指标列表，多个 setId 时返回按 setId 分组的结果
 `,
       inputSchema: z.object({
-        setId: z.string().describe('数据集ID，来自 cnbs_search 或 cnbs_fetch_nodes 的 isEnd=true 节点'),
+        setIds: z.union([z.string(), z.array(z.string())]).describe('单个或多个数据集ID'),
         name: z.string().optional().describe('指标名称过滤（可选）'),
       }).strict(),
       annotations: {
@@ -458,18 +430,19 @@ Returns:
     },
     async (args) => {
       try {
-        const metrics = await cnbsModernClient.fetchMetrics({
-          setId: args.setId,
-          name: args.name,
+        const idList = Array.isArray(args.setIds) ? args.setIds : [args.setIds];
+        if (idList.length === 1) {
+          const metrics = await cnbsModernClient.fetchMetrics({ setId: idList[0], name: args.name });
+          return { content: [{ type: 'text', text: JSON.stringify(metrics, null, 2) }], structuredContent: { metrics } };
+        }
+        const settled = await Promise.allSettled(idList.map((id) => cnbsModernClient.fetchMetrics({ setId: id, name: args.name })));
+        const combined: Record<string, any> = {};
+        settled.forEach((r, i) => {
+          combined[idList[i]] = r.status === 'fulfilled' ? r.value : { error: (r as PromiseRejectedResult).reason?.message };
         });
-        return {
-          content: [{ type: 'text', text: JSON.stringify(metrics, null, 2) }],
-          structuredContent: { metrics },
-        };
+        return { content: [{ type: 'text', text: JSON.stringify(combined, null, 2) }], structuredContent: combined };
       } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
+        return { content: [{ type: 'text', text: `Error: ${(error as Error).message}` }] };
       }
     }
   );
@@ -479,7 +452,7 @@ Returns:
     {
       title: 'Fetch CNBS Series',
       description: `批量获取统计指标数据。支持多个指标ID、多个时间段、多地区。
-      
+
 Args:
   - setId (string): 数据集ID
   - metricIds (string[]): 指标ID数组
@@ -533,7 +506,7 @@ Returns:
     {
       title: 'Fetch CNBS End Nodes',
       description: `递归获取指定分类代码下所有叶子节点（setId）。注意：耗时长，不建议频繁使用。
-      
+
 Args:
   - category (string): 分类代码：1月度 2季度 3年度 5分省季度 6分省年度 7其他
 
@@ -566,139 +539,18 @@ Returns:
   );
 
   server.registerTool(
-    'cnbs_get_cache_stats',
-    {
-      title: 'Get CNBS Cache Stats',
-      description: '获取缓存使用情况的统计信息。',
-      inputSchema: z.object({}).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async () => {
-      try {
-        const stats = cnbsModernClient.getCacheStats();
-        return {
-          content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }],
-          structuredContent: { stats },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  server.registerTool(
-    'cnbs_format_number',
-    {
-      title: 'Format CNBS Number',
-      description: '格式化统计数据值，支持设置精度。',
-      inputSchema: z.object({
-        value: z.string().describe('要格式化的数据值'),
-        precision: z.number().optional().default(2).describe('精度，默认2位小数'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const formattedNumber = CnbsDataHelper.formatNumber(args.value, args.precision);
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ formattedNumber }, null, 2) }],
-          structuredContent: { formattedNumber },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  server.registerTool(
-    'cnbs_transform_unit',
-    {
-      title: 'Transform CNBS Unit',
-      description: '在不同单位之间转换统计数据值。',
-      inputSchema: z.object({
-        value: z.string().describe('要转换的数据值'),
-        sourceUnit: z.string().describe('原始单位'),
-        targetUnit: z.string().describe('目标单位'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const transformedValue = CnbsDataHelper.transformUnit(args.value, args.sourceUnit, args.targetUnit);
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ transformedValue }, null, 2) }],
-          structuredContent: { transformedValue },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  server.registerTool(
-    'cnbs_compute_stats',
-    {
-      title: 'Compute CNBS Stats',
-      description: '计算数据的基本统计信息，包括最小值、最大值、平均值和总和。',
-      inputSchema: z.object({
-        values: z.array(z.string()).describe('数据值数组'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const computedStats = CnbsDataHelper.computeStats(args.values);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(computedStats, null, 2) }],
-          structuredContent: computedStats,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  server.registerTool(
     'cnbs_get_regions',
     {
       title: 'Get CNBS Regions',
       description: `获取可用的地区列表，用于分省数据查询。返回地区代码和名称列表。
-      
+
 Args:
   - keyword (string): 搜索关键词，可选，用于过滤地区
   - level (string): 地区级别过滤，可选：province（省级）、city（市级）、county（县级）
 
 Returns:
   地区列表，包含 code（地区代码）、name（全称）、shortName（简称）
-  
+
 示例：
   - 不传参数：返回所有省份
   - keyword="广东"：返回广东省
@@ -718,15 +570,15 @@ Returns:
     async (args) => {
       try {
         let regions = CNBS_REGIONS;
-        
+
         if (args.keyword) {
           regions = searchRegions(args.keyword);
         }
-        
+
         if (args.level) {
           regions = regions.filter(r => r.level === args.level);
         }
-        
+
         return {
           content: [{ type: 'text', text: JSON.stringify({ regions, count: regions.length }, null, 2) }],
           structuredContent: { regions, count: regions.length },
@@ -744,10 +596,10 @@ Returns:
     {
       title: 'Get CNBS Categories',
       description: `获取所有数据分类信息，包括分类代码、名称和时间粒度。
-      
+
 Returns:
   分类列表，包含代码、名称、时间粒度类型
-  
+
 示例返回：
   - 代码 1：月度数据（CPI、PPI等）
   - 代码 2：季度数据（GDP季度值等）
@@ -769,7 +621,7 @@ Returns:
           name: info.name,
           dtType: info.dtType,
         }));
-        
+
         return {
           content: [{ type: 'text', text: JSON.stringify({ categories }, null, 2) }],
           structuredContent: { categories },
@@ -787,14 +639,14 @@ Returns:
     {
       title: 'Batch Search CNBS Data',
       description: `批量搜索多个关键词的统计数据。一次性查询多个指标，提高效率。
-      
+
 Args:
   - keywords (string[]): 搜索关键词数组，如 ["GDP", "CPI", "人口"]
   - pageSize (number): 每个关键词返回的结果数量，默认5
 
 Returns:
   按关键词分组的搜索结果
-  
+
 示例：
   cnbs_batch_search(keywords=["GDP", "CPI", "出生率"])
   返回三个关键词各自的搜索结果
@@ -813,7 +665,7 @@ Returns:
     async (args) => {
       try {
         const results = await cnbsModernClient.batchFindItems(args.keywords, args.pageSize);
-        
+
         return {
           content: [{ type: 'text', text: JSON.stringify(results, null, 2) }],
           structuredContent: results,
@@ -831,7 +683,7 @@ Returns:
     {
       title: 'Compare CNBS Data',
       description: `对比不同地区或不同时间的数据。支持地区对比和时间对比。
-      
+
 Args:
   - keyword (string): 搜索关键词
   - regions (string[]): 要对比的地区名称数组，如 ["北京", "上海", "广东"]
@@ -840,7 +692,7 @@ Args:
 
 Returns:
   对比结果表格
-  
+
 示例：
   - 地区对比：cnbs_compare(keyword="GDP", regions=["北京", "上海"], compareType="region")
   - 时间对比：cnbs_compare(keyword="GDP", compareType="time", years=["2022", "2023", "2024"])
@@ -862,7 +714,7 @@ Returns:
       try {
         const searchResult = await cnbsModernClient.findItems({ keyword: args.keyword, pageSize: 20 });
         const dataList = searchResult?.data?.data || searchResult?.data || [];
-        
+
         if (!dataList || dataList.length === 0) {
           return {
             content: [{ type: 'text', text: `未找到关键词 "${args.keyword}" 的数据` }],
@@ -874,16 +726,16 @@ Returns:
             const region = getRegionByName(name);
             return { name, code: region?.code || '000000000000' };
           });
-          
+
           const comparison: any[] = [];
-          
+
           for (const item of dataList) {
-            const regionInfo = regionCodes.find(r => 
-              r.code === item.da || 
+            const regionInfo = regionCodes.find(r =>
+              r.code === item.da ||
               item.da_name?.includes(r.name) ||
               r.name.includes(item.da_name || '')
             );
-            
+
             if (regionInfo) {
               comparison.push({
                 region: item.da_name || regionInfo.name,
@@ -894,7 +746,7 @@ Returns:
               });
             }
           }
-          
+
           const groupedByRegion: Record<string, any> = {};
           for (const item of comparison) {
             if (!groupedByRegion[item.region]) {
@@ -906,7 +758,7 @@ Returns:
               period: item.period,
             };
           }
-          
+
           return {
             content: [{ type: 'text', text: JSON.stringify({
               keyword: args.keyword,
@@ -922,10 +774,10 @@ Returns:
             },
           };
         }
-        
+
         if (args.compareType === 'time' && args.years) {
           const comparison: any[] = [];
-          
+
           for (const item of dataList) {
             const year = item.dt?.toString();
             if (year && args.years.includes(year)) {
@@ -938,7 +790,7 @@ Returns:
               });
             }
           }
-          
+
           const groupedByYear: Record<string, any> = {};
           for (const item of comparison) {
             if (!groupedByYear[item.year]) {
@@ -950,7 +802,7 @@ Returns:
               region: item.region,
             };
           }
-          
+
           return {
             content: [{ type: 'text', text: JSON.stringify({
               keyword: args.keyword,
@@ -966,7 +818,7 @@ Returns:
             },
           };
         }
-        
+
         return {
           content: [{ type: 'text', text: JSON.stringify({
             keyword: args.keyword,
@@ -982,131 +834,60 @@ Returns:
     }
   );
 
-  // 数据同步工具
+  // 中国宏观经济一览
   server.registerTool(
-    'cnbs_sync_data',
+    'cnbs_economic_snapshot',
     {
-      title: 'Sync CNBS Data',
-      description: `同步国家统计局数据，确保数据的准确性和时效性。
-      
-Args:
-  - categories (string[]): 要同步的分类代码数组，如 ["1", "2", "3"]
-  - forceSync (boolean): 是否强制同步，忽略最近同步时间
+      title: 'China Economic Snapshot',
+      description: `一次性获取中国当前核心宏观经济指标的最新值，覆盖 GDP、CPI、PPI、PMI、失业率、工业、消费、投资、贸易、货币供应。
+适合需要快速了解中国经济全貌的场景，避免多次单独调用 cnbs_search。
 
 Returns:
-  同步结果，包括每个分类的同步状态
-  
+  10 项核心指标的最新值及元数据（指标名、值、单位、时间）
+
 示例：
-  cnbs_sync_data(categories=["1", "2"], forceSync=true)
+  cnbs_economic_snapshot()
 `,
-      inputSchema: z.object({
-        categories: z.array(z.string()).optional().default(['1', '2', '3', '5', '6']).describe('要同步的分类代码数组'),
-        forceSync: z.boolean().optional().default(false).describe('是否强制同步'),
-      }).strict(),
+      inputSchema: z.object({}).strict(),
       annotations: {
-        readOnlyHint: false,
+        readOnlyHint: true,
         destructiveHint: false,
-        idempotentHint: false,
+        idempotentHint: true,
         openWorldHint: true,
       },
     },
-    async (args) => {
+    async () => {
       try {
-        const result = await cnbsModernClient.syncData({
-          categories: args.categories,
-          forceSync: args.forceSync,
+        const keywords = [
+          'GDP',
+          '居民消费价格指数',
+          '工业生产者出厂价格指数',
+          '制造业采购经理指数',
+          '城镇调查失业率',
+          '规模以上工业增加值',
+          '社会消费品零售总额',
+          '固定资产投资',
+          '货物进出口总额',
+          'M2货币供应量',
+        ];
+        const results = await cnbsModernClient.batchFindItems(keywords, 1);
+        const snapshot = keywords.map((keyword) => {
+          const items = results[keyword] || [];
+          const item = items[0];
+          return {
+            indicator: keyword,
+            value: item?.value ?? null,
+            unit: item?.show_name?.match(/[（(](.+)[)）]/)?.[1] ?? null,
+            period: item?.dt_name ?? item?.dt ?? null,
+            name: item?.show_name ?? null,
+          };
         });
         return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          structuredContent: result,
+          content: [{ type: 'text', text: JSON.stringify({ snapshot, count: snapshot.length }, null, 2) }],
+          structuredContent: { snapshot, count: snapshot.length },
         };
       } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 获取同步状态工具
-  server.registerTool(
-    'cnbs_get_sync_status',
-    {
-      title: 'Get CNBS Sync Status',
-      description: `获取数据同步状态，了解各分类数据的同步情况。
-      
-Args:
-  - category (string): 分类代码，可选，不指定则返回所有分类的状态
-
-Returns:
-  同步状态信息，包括最后同步时间、状态等
-  
-示例：
-  cnbs_get_sync_status(category="3")  // 获取年度数据的同步状态
-  cnbs_get_sync_status()  // 获取所有分类的同步状态
-`,
-      inputSchema: z.object({
-        category: z.string().optional().describe('分类代码，可选'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const status = cnbsModernClient.getSyncStatus(args.category);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(status, null, 2) }],
-          structuredContent: status,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 检查数据新鲜度工具
-  server.registerTool(
-    'cnbs_check_data_freshness',
-    {
-      title: 'Check CNBS Data Freshness',
-      description: `检查数据集的新鲜度，判断数据是否需要更新。
-      
-Args:
-  - setId (string): 数据集ID
-
-Returns:
-  数据新鲜度信息，包括是否新鲜、最后更新时间等
-  
-示例：
-  cnbs_check_data_freshness(setId="some_set_id")
-`,
-      inputSchema: z.object({
-        setId: z.string().describe('数据集ID'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const freshness = await cnbsModernClient.checkDataFreshness(args.setId);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(freshness, null, 2) }],
-          structuredContent: freshness,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
+        return createToolErrorResult('cnbs_economic_snapshot', error);
       }
     }
   );
@@ -1120,7 +901,7 @@ Returns:
 
 Returns:
   数据源列表，包括名称、描述、状态等信息
-  
+
 示例：
   cnbs_list_data_sources()
 `,
@@ -1289,13 +1070,13 @@ Returns:
     {
       title: 'Get Source Categories',
       description: `获取特定数据源的分类信息。
-      
+
 Args:
   - source (string): 数据源名称，如 "census"、"international"、"department"
 
 Returns:
   数据源的分类信息
-  
+
 示例：
   cnbs_get_source_categories(source="census")
   cnbs_get_source_categories(source="international")
@@ -1331,14 +1112,14 @@ Returns:
     {
       title: 'Search in Specific Source',
       description: `在特定数据源中搜索数据。
-      
+
 Args:
   - source (string): 数据源名称，如 "census"、"international"、"department"
   - keyword (string): 搜索关键词
 
 Returns:
   搜索结果
-  
+
 示例：
   cnbs_search_in_source(source="census", keyword="人口")
   cnbs_search_in_source(source="international", keyword="GDP")
@@ -1369,651 +1150,6 @@ Returns:
     }
   );
 
-  // 数据质量评估工具
-  server.registerTool(
-    'cnbs_assess_data_quality',
-    {
-      title: 'Assess Data Quality',
-      description: `评估数据质量，包括完整性、准确性、一致性和及时性。
-      
-Args:
-  - data (array): 要评估的数据数组，每个元素应包含 value 字段
-
-Returns:
-  数据质量评估结果，包括各项指标和问题列表
-  
-示例：
-  cnbs_assess_data_quality(data=[{value: "100"}, {value: "200"}, {value: "无数据"}])
-`,
-      inputSchema: z.object({
-        data: z.array(z.object({
-          value: z.string().optional(),
-          period: z.string().optional(),
-          region: z.string().optional(),
-        })).describe('要评估的数据数组'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const quality = DataQualityAssessor.assess(args.data);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(quality, null, 2) }],
-          structuredContent: quality,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据摘要生成工具
-  server.registerTool(
-    'cnbs_generate_summary',
-    {
-      title: 'Generate Data Summary',
-      description: `生成数据摘要，包括总项数、有效项数、缺失项数、数据类型分布和时间范围。
-      
-Args:
-  - data (array): 要分析的数据数组
-
-Returns:
-  数据摘要信息
-  
-示例：
-  cnbs_generate_summary(data=[{value: "100", period: "202401MM"}, {value: "200", period: "202402MM"}])
-`,
-      inputSchema: z.object({
-        data: z.array(z.object({
-          value: z.string().optional(),
-          period: z.string().optional(),
-          region: z.string().optional(),
-        })).describe('要分析的数据数组'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const summary = CnbsDataHelper.generateDataSummary(args.data);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(summary, null, 2) }],
-          structuredContent: summary,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 增强的数字格式化工具
-  server.registerTool(
-    'cnbs_enhanced_format_number',
-    {
-      title: 'Enhanced Format Number',
-      description: `增强的数字格式化，支持多种格式选项。
-      
-Args:
-  - value (string): 要格式化的值
-  - precision (number): 小数位数，默认2
-  - format (string): 格式类型，可选 fixed（固定小数）、compact（紧凑格式）、percent（百分比）
-
-Returns:
-  格式化后的数字
-  
-示例：
-  cnbs_enhanced_format_number(value="123456789", precision=2, format="compact")
-  cnbs_enhanced_format_number(value="0.05", precision=1, format="percent")
-`,
-      inputSchema: z.object({
-        value: z.string().describe('要格式化的值'),
-        precision: z.number().optional().default(2).describe('小数位数，默认2'),
-        format: z.enum(['fixed', 'compact', 'percent']).optional().default('fixed').describe('格式类型'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const formatted = CnbsDataHelper.formatNumber(args.value, args.precision, args.format);
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ formatted }, null, 2) }],
-          structuredContent: { formatted },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据验证和清理工具
-  server.registerTool(
-    'cnbs_validate_data',
-    {
-      title: 'Validate and Clean Data',
-      description: `验证和清理数据，处理无数据标记、空白字符等。
-      
-Args:
-  - value (string): 要验证和清理的值
-
-Returns:
-  清理后的值，无数据返回 null
-  
-示例：
-  cnbs_validate_data(value="  1,234.56  ")
-  cnbs_validate_data(value="无数据")
-`,
-      inputSchema: z.object({
-        value: z.string().describe('要验证和清理的值'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const cleaned = CnbsDataHelper.validateAndCleanData(args.value);
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ cleaned }, null, 2) }],
-          structuredContent: { cleaned },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据可视化工具 - 生成图表配置
-  server.registerTool(
-    'cnbs_generate_chart',
-    {
-      title: 'Generate Chart Configuration',
-      description: `生成数据可视化图表配置，支持多种图表类型。
-      
-Args:
-  - type (string): 图表类型，可选 line、bar、pie、scatter、radar、heatmap、treemap、gauge
-  - data (object): 图表数据
-  - options (object): 图表配置选项
-
-Returns:
-  图表配置对象，可用于前端图表库
-  
-示例：
-  cnbs_generate_chart(type="line", data={series: [{name: "GDP", data: [100, 110, 120, 130, 140]}], xAxis: {data: ["2020", "2021", "2022", "2023", "2024"]}}, options={title: "GDP趋势"})
-`,
-      inputSchema: z.object({
-        type: z.string().describe('图表类型，可选 line、bar、pie、scatter、radar、heatmap、treemap、gauge'),
-        data: z.object({}).passthrough().describe('图表数据'),
-        options: z.object({}).passthrough().optional().describe('图表配置选项'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const chartType = Object.values(ChartType).find(t => t === args.type) || ChartType.LINE;
-        const config = dataVisualizationService.generateChartConfig(args.data, chartType, args.options);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(config, null, 2) }],
-          structuredContent: config,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据分析工具 - 趋势分析
-  server.registerTool(
-    'cnbs_analyze_trend',
-    {
-      title: 'Analyze Data Trend',
-      description: `分析数据趋势，包括方向、变化量、变化百分比和斜率。
-      
-Args:
-  - values (array): 数据值数组，按时间顺序排列
-
-Returns:
-  趋势分析结果
-  
-示例：
-  cnbs_analyze_trend(values=[100, 110, 120, 130, 140])
-`,
-      inputSchema: z.object({
-        values: z.array(z.number()).describe('数据值数组，按时间顺序排列'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const trend = dataAnalysisService.analyzeTrend(args.values);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(trend, null, 2) }],
-          structuredContent: trend,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据分析工具 - 相关性分析
-  server.registerTool(
-    'cnbs_analyze_correlation',
-    {
-      title: 'Analyze Data Correlation',
-      description: `分析两组数据之间的相关性。
-      
-Args:
-  - data1 (array): 第一组数据值数组
-  - data2 (array): 第二组数据值数组
-
-Returns:
-  相关性分析结果，包括相关系数和强度
-  
-示例：
-  cnbs_analyze_correlation(data1=[100, 110, 120, 130, 140], data2=[50, 55, 60, 65, 70])
-`,
-      inputSchema: z.object({
-        data1: z.array(z.number()).describe('第一组数据值数组'),
-        data2: z.array(z.number()).describe('第二组数据值数组'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const correlation = dataAnalysisService.analyzeCorrelation(args.data1, args.data2);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(correlation, null, 2) }],
-          structuredContent: correlation,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据分析工具 - 异常检测
-  server.registerTool(
-    'cnbs_detect_anomalies',
-    {
-      title: 'Detect Anomalies',
-      description: `检测数据中的异常值。
-      
-Args:
-  - values (array): 数据值数组
-  - threshold (number): 异常检测阈值，默认2（标准差倍数）
-
-Returns:
-  异常检测结果，包括异常值列表和统计信息
-  
-示例：
-  cnbs_detect_anomalies(values=[100, 110, 120, 500, 140], threshold=2)
-`,
-      inputSchema: z.object({
-        values: z.array(z.number()).describe('数据值数组'),
-        threshold: z.number().optional().default(2).describe('异常检测阈值，默认2（标准差倍数）'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const anomalies = dataAnalysisService.detectAnomalies(args.values, args.threshold);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(anomalies, null, 2) }],
-          structuredContent: anomalies,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据分析工具 - 统计分析
-  server.registerTool(
-    'cnbs_analyze_statistics',
-    {
-      title: 'Analyze Statistics',
-      description: `计算数据的基本统计信息，包括均值、中位数、标准差等。
-      
-Args:
-  - values (array): 数据值数组
-
-Returns:
-  统计分析结果
-  
-示例：
-  cnbs_analyze_statistics(values=[100, 110, 120, 130, 140])
-`,
-      inputSchema: z.object({
-        values: z.array(z.number()).describe('数据值数组'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const statistics = dataAnalysisService.analyzeStatistics(args.values);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(statistics, null, 2) }],
-          structuredContent: statistics,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据分析工具 - 时间序列分析
-  server.registerTool(
-    'cnbs_analyze_time_series',
-    {
-      title: 'Analyze Time Series',
-      description: `分析时间序列数据，包括趋势、季节性等。
-      
-Args:
-  - values (array): 时间序列数据值数组
-  - period (number): 季节性周期，默认12
-
-Returns:
-  时间序列分析结果
-  
-示例：
-  cnbs_analyze_time_series(values=[100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 210, 220], period=12)
-`,
-      inputSchema: z.object({
-        values: z.array(z.number()).describe('时间序列数据值数组'),
-        period: z.number().optional().default(12).describe('季节性周期，默认12'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const timeSeries = dataAnalysisService.analyzeTimeSeries(args.values, { period: args.period });
-        return {
-          content: [{ type: 'text', text: JSON.stringify(timeSeries, null, 2) }],
-          structuredContent: timeSeries,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据分析工具 - 预测分析
-  server.registerTool(
-    'cnbs_predict_data',
-    {
-      title: 'Predict Data',
-      description: `基于历史数据预测未来值。
-      
-Args:
-  - values (array): 历史数据值数组
-  - futureSteps (number): 预测未来步数，默认5
-
-Returns:
-  预测结果，包括历史数据和预测值
-  
-示例：
-  cnbs_predict_data(values=[100, 110, 120, 130, 140], futureSteps=3)
-`,
-      inputSchema: z.object({
-        values: z.array(z.number()).describe('历史数据值数组'),
-        futureSteps: z.number().optional().default(5).describe('预测未来步数，默认5'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const prediction = dataAnalysisService.predict(args.values, args.futureSteps);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(prediction, null, 2) }],
-          structuredContent: prediction,
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据转换工具 - 标准化数据
-  server.registerTool(
-    'cnbs_normalize_data',
-    {
-      title: 'Normalize Data',
-      description: `将数据标准化到[0, 1]范围。
-      
-Args:
-  - values (array): 数据值数组
-
-Returns:
-  标准化后的数据数组
-  
-示例：
-  cnbs_normalize_data(values=[100, 110, 120, 130, 140])
-`,
-      inputSchema: z.object({
-        values: z.array(z.number()).describe('数据值数组'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const normalized = dataTransformationService.normalize(args.values);
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ normalized }, null, 2) }],
-          structuredContent: { normalized },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据转换工具 - 标准化数据（Z-score）
-  server.registerTool(
-    'cnbs_standardize_data',
-    {
-      title: 'Standardize Data (Z-score)',
-      description: `使用Z-score方法标准化数据。
-      
-Args:
-  - values (array): 数据值数组
-
-Returns:
-  标准化后的数据数组
-  
-示例：
-  cnbs_standardize_data(values=[100, 110, 120, 130, 140])
-`,
-      inputSchema: z.object({
-        values: z.array(z.number()).describe('数据值数组'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const standardized = dataTransformationService.standardize(args.values);
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ standardized }, null, 2) }],
-          structuredContent: { standardized },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据转换工具 - 移动平均
-  server.registerTool(
-    'cnbs_moving_average',
-    {
-      title: 'Calculate Moving Average',
-      description: `计算数据的移动平均值。
-      
-Args:
-  - values (array): 数据值数组
-  - window (number): 移动窗口大小，默认3
-
-Returns:
-  移动平均后的数据数组
-  
-示例：
-  cnbs_moving_average(values=[100, 110, 120, 130, 140], window=3)
-`,
-      inputSchema: z.object({
-        values: z.array(z.number()).describe('数据值数组'),
-        window: z.number().optional().default(3).describe('移动窗口大小，默认3'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const movingAvg = dataTransformationService.movingAverage(args.values, args.window);
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ movingAvg }, null, 2) }],
-          structuredContent: { movingAvg },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
-
-  // 数据转换工具 - 指数平滑
-  server.registerTool(
-    'cnbs_exponential_smoothing',
-    {
-      title: 'Apply Exponential Smoothing',
-      description: `对数据应用指数平滑。
-      
-Args:
-  - values (array): 数据值数组
-  - alpha (number): 平滑系数，默认0.3
-
-Returns:
-  平滑后的数据数组
-  
-示例：
-  cnbs_exponential_smoothing(values=[100, 110, 120, 130, 140], alpha=0.3)
-`,
-      inputSchema: z.object({
-        values: z.array(z.number()).describe('数据值数组'),
-        alpha: z.number().optional().default(0.3).describe('平滑系数，默认0.3'),
-      }).strict(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args) => {
-      try {
-        const smoothed = dataTransformationService.exponentialSmoothing(args.values, args.alpha);
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ smoothed }, null, 2) }],
-          structuredContent: { smoothed },
-        };
-      } catch (error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${(error as Error).message}` }],
-        };
-      }
-    }
-  );
   // ─── 外部数据源：世界银行 ───────────────────────────────────────
   server.registerTool(
     'ext_world_bank',
@@ -2111,32 +1247,36 @@ Args:
     'ext_imf',
     {
       title: 'IMF DataMapper Query',
-      description: `查询 IMF 世界经济展望 (WEO) 数据。支持 GDP 增速、通胀、失业率、经常账户、政府债务等。完全免费，无需认证。
+      description: `查询 IMF 世界经济展望 (WEO) 数据。支持 GDP 增速、通胀、失业率、经常账户、政府债务等。支持同时查询多个指标。完全免费，无需认证。
 
 Args:
-  - indicator (string): 指标名如 "GDP_GROWTH"、"CPI_INFLATION" 或 IMF 代码如 "NGDP_RPCH"
+  - indicators (string | string[]): 单个或多个指标名/IMF代码，如 "GDP_GROWTH" 或 ["GDP_GROWTH","CPI_INFLATION","GOVT_DEBT"]
   - countries (string[]): ISO 代码数组，如 ["CHN","USA","JPN"]；默认 ["CHN"]
   - periods (string[]): 年份数组，如 ["2020","2021","2022","2023"]；不传则返回全部
 
 常用指标: GDP_GROWTH | GDP_USD | GDP_PER_CAPITA | CPI_INFLATION | UNEMPLOYMENT | CURRENT_ACCOUNT | GOVT_DEBT | GOVT_BALANCE | GROSS_SAVINGS | INVESTMENT | POPULATION
 `,
       inputSchema: z.object({
-        indicator: z.string().describe('指标名如 "GDP_GROWTH" 或 IMF 代码如 "NGDP_RPCH"'),
+        indicators: z.union([z.string(), z.array(z.string())]).describe('单个或多个指标名，如 "GDP_GROWTH" 或 ["GDP_GROWTH","CPI_INFLATION"]'),
         countries: z.array(z.string()).optional().default(['CHN']).describe('ISO 代码数组，如 ["CHN","USA"]'),
         periods: z.array(z.string()).optional().describe('年份数组，如 ["2020","2021","2022"]'),
       }).strict(),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async (args) => {
-      const result = await imfSource.fetchData({
-        indicator: args.indicator,
-        countries: args.countries,
-        periods: args.periods,
+      const indicatorList = Array.isArray(args.indicators) ? args.indicators : [args.indicators];
+      if (indicatorList.length === 1) {
+        const result = await imfSource.fetchData({ indicator: indicatorList[0], countries: args.countries, periods: args.periods });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], structuredContent: result };
+      }
+      const settled = await Promise.allSettled(
+        indicatorList.map((ind) => imfSource.fetchData({ indicator: ind, countries: args.countries, periods: args.periods }))
+      );
+      const combined: Record<string, any> = {};
+      settled.forEach((r, i) => {
+        combined[indicatorList[i]] = r.status === 'fulfilled' ? r.value : { error: (r as PromiseRejectedResult).reason?.message };
       });
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        structuredContent: result,
-      };
+      return { content: [{ type: 'text', text: JSON.stringify(combined, null, 2) }], structuredContent: combined };
     }
   );
 
@@ -2247,11 +1387,11 @@ Args:
     'ext_bis',
     {
       title: 'BIS Statistics Query',
-      description: `查询国际清算银行 (BIS) 统计数据。涵盖有效汇率、信贷缺口、住宅房价、债务偿还比率等金融稳定指标。完全免费，无需认证。
+      description: `查询国际清算银行 (BIS) 统计数据。涵盖有效汇率、信贷缺口、住宅房价、债务偿还比率等金融稳定指标。支持同时查询多个国家。完全免费，无需认证。
 
 Args:
   - dataset (string): 数据集名，如 "EER"（有效汇率）、"CREDIT_GAP"（信贷缺口）、"PROPERTY_PRICES"（房价）
-  - country (string): ISO2 代码，如 "CN"（中国）、"US"（美国）；默认 "CN"
+  - countries (string | string[]): 单个或多个 ISO2 代码，如 "CN" 或 ["CN","US","DE"]；默认 "CN"
   - lastNObservations (number): 最近 N 期，默认 20
   - startPeriod (string): 起始期间，如 "2015-Q1" 或 "2015-01"
 
@@ -2259,25 +1399,26 @@ Args:
 `,
       inputSchema: z.object({
         dataset: z.string().describe('数据集: EER | CREDIT_GAP | TOTAL_CREDIT | PROPERTY_PRICES | DEBT_SERVICE | CROSS_BORDER_BANKING'),
-        country: z.string().optional().default('CN').describe('ISO2 国家代码，如 "CN"、"US"、"DE"'),
-        key: z.string().optional().describe('覆盖默认键模板（高级用法）'),
+        countries: z.union([z.string(), z.array(z.string())]).optional().default('CN').describe('单个或多个 ISO2 代码，如 "CN" 或 ["CN","US","DE"]'),
+        key: z.string().optional().describe('覆盖默认键模板（高级用法，单国）'),
         lastNObservations: z.number().optional().default(20).describe('最近 N 期数据'),
         startPeriod: z.string().optional().describe('起始期间，如 "2015-Q1" 或 "2015-01"'),
       }).strict(),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async (args) => {
-      const result = await bisSource.fetchData({
-        dataset: args.dataset,
-        country: args.country,
-        key: args.key,
-        lastNObservations: args.lastNObservations,
-        startPeriod: args.startPeriod,
+      const countryList = Array.isArray(args.countries) ? args.countries : [args.countries ?? 'CN'];
+      const params = { dataset: args.dataset, key: args.key, lastNObservations: args.lastNObservations, startPeriod: args.startPeriod };
+      if (countryList.length === 1) {
+        const result = await bisSource.fetchData({ ...params, country: countryList[0] });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], structuredContent: result };
+      }
+      const settled = await Promise.allSettled(countryList.map((c) => bisSource.fetchData({ ...params, country: c })));
+      const combined: Record<string, any> = {};
+      settled.forEach((r, i) => {
+        combined[countryList[i]] = r.status === 'fulfilled' ? r.value : { error: (r as PromiseRejectedResult).reason?.message };
       });
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        structuredContent: result,
-      };
+      return { content: [{ type: 'text', text: JSON.stringify(combined, null, 2) }], structuredContent: combined };
     }
   );
 
@@ -2307,20 +1448,20 @@ Args:
     'ext_fred',
     {
       title: 'FRED Economic Data (Federal Reserve)',
-      description: `查询美联储经济数据库 (FRED)。涵盖美国GDP、利率、汇率、通胀、大宗商品价格等 800,000+ 系列。
+      description: `查询美联储经济数据库 (FRED)。涵盖美国GDP、利率、汇率、通胀、大宗商品价格等 800,000+ 系列。支持同时查询多个系列。
 ⚠️ 需要 FRED API Key：在 MCP 客户端配置中添加请求头 X-Fred-Api-Key: <your_key>（在 https://fred.stlouisfed.org/docs/api/api_key.html 免费申请）。stdio 模式可改用 FRED_API_KEY 环境变量。
 
 Args:
-  - series (string): 系列名如 "US_GDP"、"FED_FUNDS"、"CNY_USD" 或 FRED 代码如 "GDP"
-  - limit (number): 返回数量，默认 100
+  - series (string | string[]): 单个或多个系列名/FRED代码，如 "FED_FUNDS" 或 ["FED_FUNDS","CNY_USD","OIL_PRICE_WTI"]
+  - limit (number): 每个系列返回数量，默认 100
   - sortOrder (string): "desc"（最新优先）或 "asc"
   - observationStart (string): 起始日期，如 "2010-01-01"
 
 常用系列: US_GDP | US_GDP_GROWTH | FED_FUNDS | US_10Y_YIELD | US_2Y_YIELD | CNY_USD | EUR_USD | US_UNEMPLOYMENT | US_CPI | OIL_PRICE_WTI | GOLD_PRICE | US_M2 | SP500 | VIX | DOLLAR_INDEX
 `,
       inputSchema: z.object({
-        series: z.string().describe('系列名如 "US_GDP" 或 FRED 代码如 "GDP"'),
-        limit: z.number().optional().default(100).describe('返回数量'),
+        series: z.union([z.string(), z.array(z.string())]).describe('单个系列名或数组，如 "FED_FUNDS" 或 ["FED_FUNDS","CNY_USD"]'),
+        limit: z.number().optional().default(100).describe('每个系列返回数量'),
         sortOrder: z.enum(['asc', 'desc']).optional().default('desc').describe('排序方向'),
         observationStart: z.string().optional().describe('起始日期 YYYY-MM-DD'),
         observationEnd: z.string().optional().describe('结束日期 YYYY-MM-DD'),
@@ -2328,17 +1469,18 @@ Args:
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async (args) => {
-      const result = await fredSource.fetchData({
-        series: args.series,
-        limit: args.limit,
-        sortOrder: args.sortOrder,
-        observationStart: args.observationStart,
-        observationEnd: args.observationEnd,
+      const seriesList = Array.isArray(args.series) ? args.series : [args.series];
+      const params = { limit: args.limit, sortOrder: args.sortOrder, observationStart: args.observationStart, observationEnd: args.observationEnd };
+      if (seriesList.length === 1) {
+        const result = await fredSource.fetchData({ series: seriesList[0], ...params });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], structuredContent: result };
+      }
+      const settled = await Promise.allSettled(seriesList.map((s) => fredSource.fetchData({ series: s, ...params })));
+      const combined: Record<string, any> = {};
+      settled.forEach((r, i) => {
+        combined[seriesList[i]] = r.status === 'fulfilled' ? r.value : { error: (r as PromiseRejectedResult).reason?.message };
       });
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        structuredContent: result,
-      };
+      return { content: [{ type: 'text', text: JSON.stringify(combined, null, 2) }], structuredContent: combined };
     }
   );
 

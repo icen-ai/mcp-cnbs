@@ -376,98 +376,60 @@ export class CnbsModernClient {
     const cacheKey = CacheKeyGenerator.generateSearchKey(
       params.keyword,
       params.pageNum || 1,
-      params.pageSize || 10
+      params.pageSize || 10,
     );
-    
-    const cached = this.nodeCache.fetch(cacheKey);
-    if (cached) {
-      console.error(`Search cache hit for ${cacheKey}`);
-      return cached;
-    }
-
-    return cnbsRequestThrottler.execute(async () => {
-      return CnbsErrorHandler.retryWithBackoff(async () => {
-        const url = new URL(`${this.baseUrl}/query`);
-        url.searchParams.set('search', params.keyword);
-        url.searchParams.set('pagenum', (params.pageNum || 1).toString());
-        url.searchParams.set('pageSize', (params.pageSize || 10).toString());
-
-        console.error(`Search Request: ${url.toString()}`);
-
-        const response = await axios.get(url.toString(), {
-          ...axiosConfig,
-          timeout: this.timeout,
-        });
-
-        validateCnbsApiResponse(url.toString(), response);
-        console.error(`Response status:`, response.status);
-        
-        // 缓存搜索结果
-        this.nodeCache.store(cacheKey, response.data, CNBS_NODE_CACHE_TTL);
-        return response.data;
-      });
-    });
+    return this.nodeCache.fetchOrLoad(
+      cacheKey,
+      () => cnbsRequestThrottler.execute(() =>
+        CnbsErrorHandler.retryWithBackoff(async () => {
+          const url = new URL(`${this.baseUrl}/query`);
+          url.searchParams.set('search', params.keyword);
+          url.searchParams.set('pagenum', (params.pageNum || 1).toString());
+          url.searchParams.set('pageSize', (params.pageSize || 10).toString());
+          console.error(`Search Request: ${url.toString()}`);
+          const response = await axios.get(url.toString(), { ...axiosConfig, timeout: this.timeout });
+          validateCnbsApiResponse(url.toString(), response);
+          console.error(`Response status:`, response.status);
+          return response.data;
+        }),
+      ),
+      CNBS_NODE_CACHE_TTL,
+      5 * 60 * 1000, // 5 min stale grace
+    );
   }
 
   async batchFindItems(keywords: string[], pageSize: number = 5): Promise<Record<string, any>> {
-    const results: Record<string, any> = {};
-    const cacheKeys: string[] = [];
-    const uncachedKeywords: string[] = [];
-    
-    // 先尝试从缓存获取
-    for (const keyword of keywords) {
-      const cacheKey = CacheKeyGenerator.generateSearchKey(keyword, 1, pageSize);
-      cacheKeys.push(cacheKey);
-      const cached = this.nodeCache.fetch(cacheKey);
-      if (cached) {
-        results[keyword] = cached;
-      } else {
-        uncachedKeywords.push(keyword);
-      }
-    }
-    
-    // 批量请求未缓存的关键词
-    for (const keyword of uncachedKeywords) {
-      try {
-        const result = await this.findItems({ keyword, pageSize });
-        results[keyword] = result;
-      } catch (error) {
-        results[keyword] = { error: (error as Error).message };
-      }
-    }
-    
-    return results;
+    const entries = await Promise.all(
+      keywords.map(async (keyword) => {
+        try {
+          const result = await this.findItems({ keyword, pageSize });
+          return [keyword, result] as const;
+        } catch (error) {
+          return [keyword, { error: (error as Error).message }] as const;
+        }
+      }),
+    );
+    return Object.fromEntries(entries);
   }
 
   async fetchNodes(params: CnbsNodeQuery): Promise<any> {
     const cacheKey = CacheKeyGenerator.generateNodeKey(params.category, params.parentId);
-    const cached = this.nodeCache.fetch(cacheKey);
-    if (cached) {
-      console.error(`Node cache hit for ${cacheKey}`);
-      return cached;
-    }
-
-    return cnbsRequestThrottler.execute(async () => {
-      return CnbsErrorHandler.retryWithBackoff(async () => {
-        const url = new URL(`${this.baseUrl}/new/queryIndexTreeAsync`);
-        if (params.parentId) {
-          url.searchParams.set('pid', params.parentId);
-        }
-        url.searchParams.set('code', params.category);
-
-        console.error(`Node Request: ${url.toString()}`);
-
-        const response = await axios.get(url.toString(), {
-          ...axiosConfig,
-          timeout: this.timeout,
-        });
-
-        validateCnbsApiResponse(url.toString(), response);
-        this.nodeCache.store(cacheKey, response.data, CNBS_NODE_CACHE_TTL);
-
-        return response.data;
-      });
-    });
+    return this.nodeCache.fetchOrLoad(
+      cacheKey,
+      () => cnbsRequestThrottler.execute(() =>
+        CnbsErrorHandler.retryWithBackoff(async () => {
+          const url = new URL(`${this.baseUrl}/new/queryIndexTreeAsync`);
+          if (params.parentId) url.searchParams.set('pid', params.parentId);
+          url.searchParams.set('code', params.category);
+          console.error(`Node Request: ${url.toString()}`);
+          const response = await axios.get(url.toString(), { ...axiosConfig, timeout: this.timeout });
+          validateCnbsApiResponse(url.toString(), response);
+          return response.data;
+        }),
+      ),
+      CNBS_NODE_CACHE_TTL,
+      30 * 60 * 1000, // 30 min stale grace for structural data
+    );
   }
 
   async fetchAllEndNodes(category: CnbsCategory): Promise<any[]> {
@@ -499,84 +461,54 @@ export class CnbsModernClient {
 
   async fetchMetrics(params: CnbsMetricQuery): Promise<any> {
     const cacheKey = CacheKeyGenerator.generateMetricKey(params.setId, params.name);
-    const cached = this.metricCache.fetch(cacheKey);
-    if (cached) {
-      console.error(`Metric cache hit for ${cacheKey}`);
-      return cached;
-    }
-
-    return cnbsRequestThrottler.execute(async () => {
-      return CnbsErrorHandler.retryWithBackoff(async () => {
-        const url = new URL(`${this.baseUrl}/new/queryIndicatorsByCid`);
-        url.searchParams.set('cid', params.setId);
-        if (params.dataType) {
-          url.searchParams.set('dt', params.dataType);
-        }
-        if (params.name) {
-          url.searchParams.set('name', params.name);
-        }
-
-        console.error(`Metric Request: ${url.toString()}`);
-
-        const response = await axios.get(url.toString(), {
-          ...axiosConfig,
-          timeout: this.timeout,
-        });
-
-        validateCnbsApiResponse(url.toString(), response);
-        this.metricCache.store(cacheKey, response.data, CNBS_METRIC_CACHE_TTL);
-
-        return response.data;
-      });
-    });
+    return this.metricCache.fetchOrLoad(
+      cacheKey,
+      () => cnbsRequestThrottler.execute(() =>
+        CnbsErrorHandler.retryWithBackoff(async () => {
+          const url = new URL(`${this.baseUrl}/new/queryIndicatorsByCid`);
+          url.searchParams.set('cid', params.setId);
+          if (params.dataType) url.searchParams.set('dt', params.dataType);
+          if (params.name) url.searchParams.set('name', params.name);
+          console.error(`Metric Request: ${url.toString()}`);
+          const response = await axios.get(url.toString(), { ...axiosConfig, timeout: this.timeout });
+          validateCnbsApiResponse(url.toString(), response);
+          return response.data;
+        }),
+      ),
+      CNBS_METRIC_CACHE_TTL,
+      15 * 60 * 1000, // 15 min stale grace
+    );
   }
 
   async fetchSeries(params: CnbsSeriesQuery): Promise<any> {
     const cacheKey = CacheKeyGenerator.generateSeriesKey(
-      params.setId,
-      params.metricIds,
-      params.periods,
-      params.areas
+      params.setId, params.metricIds, params.periods, params.areas,
     );
-
-    const cachedData = this.seriesCache.fetch(cacheKey);
-    if (cachedData) {
-      console.error(`Series cache hit for ${cacheKey}`);
-      return cachedData;
-    }
-
-    return cnbsRequestThrottler.execute(async () => {
-      return CnbsErrorHandler.retryWithBackoff(async () => {
-        const payload = {
-          cid: params.setId,
-          indicatorIds: params.metricIds,
-          das: params.areas || [{ text: '全国', code: '000000000000' }],
-          dts: params.periods,
-          showType: params.displayMode || '1',
-          rootId: params.rootId || this.rootId,
-        };
-
-        console.error(`Series Request: ${this.baseUrl}/getEsDataByCidAndDt`);
-        console.error(`Payload:`, JSON.stringify(payload, null, 2));
-
-        const response = await axios.post(
-          `${this.baseUrl}/getEsDataByCidAndDt`,
-          payload,
-          {
-            ...axiosConfig,
-            timeout: this.timeout,
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          }
-        );
-
-        validateCnbsApiResponse(`${this.baseUrl}/getEsDataByCidAndDt`, response);
-        this.seriesCache.store(cacheKey, response.data, CNBS_DATA_CACHE_TTL);
-
-        return response.data;
-      });
-    });
+    return this.seriesCache.fetchOrLoad(
+      cacheKey,
+      () => cnbsRequestThrottler.execute(() =>
+        CnbsErrorHandler.retryWithBackoff(async () => {
+          const payload = {
+            cid: params.setId,
+            indicatorIds: params.metricIds,
+            das: params.areas || [{ text: '全国', code: '000000000000' }],
+            dts: params.periods,
+            showType: params.displayMode || '1',
+            rootId: params.rootId || this.rootId,
+          };
+          console.error(`Series Request: ${this.baseUrl}/getEsDataByCidAndDt`);
+          console.error(`Payload:`, JSON.stringify(payload, null, 2));
+          const response = await axios.post(
+            `${this.baseUrl}/getEsDataByCidAndDt`, payload,
+            { ...axiosConfig, timeout: this.timeout, headers: { 'Content-Type': 'application/json' } },
+          );
+          validateCnbsApiResponse(`${this.baseUrl}/getEsDataByCidAndDt`, response);
+          return response.data;
+        }),
+      ),
+      CNBS_DATA_CACHE_TTL,
+      10 * 60 * 1000, // 10 min stale grace
+    );
   }
 
   // 批量获取数据系列
